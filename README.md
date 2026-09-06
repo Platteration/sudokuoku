@@ -27,9 +27,13 @@ set in `app.json`.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # vitest: generator, solver, every shift, the game reducer
+npm test           # vitest: generator, solver, every shift, phantoms, the game reducer
 npm run check      # both
 ```
+
+GitHub Actions runs the same checks plus an Android and web Metro bundle on
+every push (`.github/workflows/ci.yml`). `eas.json` carries development,
+preview (Android APK) and production build profiles.
 
 ## How the shifting works
 
@@ -90,9 +94,11 @@ shifts, undo brings the digit back, and the digit-shift relabels a fading digit
 like any other.
 
 Undo rewinds the shift together with the move. Settings let you pick which
-shift kinds are allowed, shift only every 2, 3 or 5 moves, and toggle
-conflict / mistake highlighting and animation. The game and its settings are
-saved locally so you can pick up where you left off.
+shift kinds are allowed, shift only every 2, 3 or 5 moves, choose a light,
+dark or system appearance, and toggle conflict / mistake highlighting and
+animation. The game and its settings are saved locally so you can pick up
+where you left off, and a statistics sheet keeps games played and won, best
+time and fewest shifts per difficulty, plus your lifetime phantom recall rate.
 
 ## Code layout
 
@@ -105,6 +111,7 @@ src/engine/game.ts          game state + reducer (moves, shifts, phantoms, undo,
 src/engine/__tests__/       vitest suites for all of the above
 src/components/Board.tsx    two-layer board; cells animate to their new spots
 src/components/*            number pad, controls, shift banner, sheets
-src/screens/GameScreen.tsx  wires the reducer, timer, persistence and sheets
-src/storage.ts              AsyncStorage save/load
+src/screens/GameScreen.tsx  wires the reducer, timer, persistence, stats and sheets
+src/storage.ts              AsyncStorage save/load for the game, stats and flags
+src/theme.tsx               light/dark palettes, ThemeProvider, useStyles
 ```

@@ -19,6 +19,7 @@ import HelpSheet from '../components/HelpSheet';
 import NumberPad from '../components/NumberPad';
 import SettingsSheet from '../components/SettingsSheet';
 import ShiftBanner from '../components/ShiftBanner';
+import StatsSheet from '../components/StatsSheet';
 import WinSheet from '../components/WinSheet';
 import {
   Action,
@@ -30,11 +31,23 @@ import {
   reduce,
   remainingCounts,
 } from '../engine';
-import { hasSeenHelp, loadGame, markHelpSeen, saveGame } from '../storage';
+import {
+  EMPTY_STATS,
+  Stats,
+  clearStats,
+  hasSeenHelp,
+  loadGame,
+  loadStats,
+  markHelpSeen,
+  recordStart,
+  recordWin,
+  saveGame,
+  saveStats,
+} from '../storage';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
 import { formatTime } from '../utils/time';
 
-type Loaded = { state: GameState; elapsed: number; firstLaunch: boolean };
+type Loaded = { state: GameState; elapsed: number; firstLaunch: boolean; stats: Stats };
 
 function haptic(kind: 'shift' | 'win' | 'tap') {
   if (Platform.OS === 'web') return;
@@ -52,14 +65,17 @@ export default function GameScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadGame(), hasSeenHelp()]).then(([saved, seenHelp]) => {
+    Promise.all([loadGame(), hasSeenHelp(), loadStats()]).then(([saved, seenHelp, stats]) => {
       if (cancelled) return;
       const firstLaunch = !seenHelp;
       if (saved && saved.state.status === 'playing') {
-        setLoaded({ state: saved.state, elapsed: saved.elapsed, firstLaunch });
+        setLoaded({ state: saved.state, elapsed: saved.elapsed, firstLaunch, stats });
       } else {
         const settings = saved ? saved.state.settings : DEFAULT_SETTINGS;
-        setLoaded({ state: newGame({ ...DEFAULT_SETTINGS, ...settings }), elapsed: 0, firstLaunch });
+        const state = newGame({ ...DEFAULT_SETTINGS, ...settings });
+        const started = recordStart(stats, state.settings.difficulty);
+        saveStats(started);
+        setLoaded({ state, elapsed: 0, firstLaunch, stats: started });
       }
     });
     return () => {
@@ -113,6 +129,12 @@ function GameView({
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(initial.firstLaunch);
   const [showWin, setShowWin] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [stats, setStats] = useState<Stats>(initial.stats);
+  const updateStats = useCallback((next: Stats) => {
+    setStats(next);
+    saveStats(next);
+  }, []);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
@@ -157,12 +179,16 @@ function GameView({
     if (state.shiftCount > lastShiftCount.current) haptic('shift');
     lastShiftCount.current = state.shiftCount;
   }, [state.shiftCount]);
+  const wonSeed = useRef<number | null>(null);
   useEffect(() => {
-    if (state.status === 'won') {
+    if (state.status === 'won' && wonSeed.current !== state.seed) {
+      wonSeed.current = state.seed;
       haptic('win');
       setShowWin(true);
+      updateStats(recordWin(stats, state, elapsed));
     }
-  }, [state.status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.seed]);
 
   const send = useCallback((action: Action) => dispatch(action), []);
 
@@ -171,8 +197,9 @@ function GameView({
       dispatch({ type: 'newGame', settings: difficulty ? { difficulty } : undefined });
       setElapsed(0);
       setShowWin(false);
+      updateStats(recordStart(stats, difficulty ?? state.settings.difficulty));
     },
-    [],
+    [dispatch, stats, state.settings.difficulty, updateStats],
   );
 
   const confirmNewGame = () => {
@@ -205,6 +232,7 @@ function GameView({
         </View>
         <View style={styles.headerButtons}>
           <HeaderButton label="?" a11y="How to play" onPress={() => setShowHelp(true)} />
+          <HeaderButton label="▤" a11y="Statistics" onPress={() => setShowStats(true)} />
           <HeaderButton label="⚙" a11y="Settings" onPress={() => setShowSettings(true)} />
           <HeaderButton label="＋" a11y="New game" onPress={confirmNewGame} />
         </View>
@@ -277,6 +305,24 @@ function GameView({
         onNewGame={(difficulty) => startNewGame(difficulty)}
       />
       <HelpSheet visible={showHelp} onClose={closeHelp} />
+      <StatsSheet
+        visible={showStats}
+        stats={stats}
+        onClose={() => setShowStats(false)}
+        onReset={() => {
+          Alert.alert('Reset statistics?', 'This cannot be undone.', [
+            { text: 'Keep', style: 'cancel' },
+            {
+              text: 'Reset',
+              style: 'destructive',
+              onPress: () => {
+                clearStats();
+                setStats(EMPTY_STATS);
+              },
+            },
+          ]);
+        }}
+      />
       <WinSheet
         visible={showWin}
         state={state}
