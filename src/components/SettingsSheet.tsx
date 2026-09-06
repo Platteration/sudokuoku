@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   ALL_SHIFT_KINDS,
   Difficulty,
+  PhantomTarget,
   SHIFT_KIND_LABEL,
   Settings,
   ShiftKind,
@@ -21,6 +22,16 @@ interface Props {
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
 const SHIFT_EVERY = [1, 2, 3, 5];
+const PHANTOM_EVERY = [2, 3, 5, 8];
+const PHANTOM_LOCK = [3, 5, 8, 12];
+const PHANTOM_MAX = [1, 2, 3, 5];
+const PHANTOM_FADE_MS = [2000, 4000, 8000];
+const PHANTOM_TARGETS: PhantomTarget[] = ['entries', 'givens', 'both'];
+const TARGET_LABEL: Record<PhantomTarget, string> = {
+  entries: 'My entries',
+  givens: 'Givens',
+  both: 'Both',
+};
 
 function Segmented<T extends string | number>({
   options,
@@ -121,6 +132,60 @@ export default function SettingsSheet({ visible, settings, onClose, onChange, on
         />
       ))}
 
+      <Text style={styles.section}>Phantom challenge</Text>
+      <Row
+        label="Digits fade away"
+        hint="Every so often a filled cell fades out and locks. Remember what was there and reason with the phantom until you can put it back."
+        value={settings.phantomMode}
+        onChange={(v) => onChange({ phantomMode: v })}
+      />
+      {settings.phantomMode ? (
+        <>
+          <Text style={styles.subsection}>Which cells can fade</Text>
+          <Segmented
+            options={PHANTOM_TARGETS}
+            value={settings.phantomTarget}
+            onChange={(t) => onChange({ phantomTarget: t })}
+            label={(t) => TARGET_LABEL[t]}
+          />
+          <Text style={styles.subsection}>A cell fades every … moves</Text>
+          <Segmented
+            options={PHANTOM_EVERY}
+            value={settings.phantomEvery}
+            onChange={(n) => onChange({ phantomEvery: n })}
+            label={(n) => `${n}`}
+          />
+          <Text style={styles.subsection}>Locked for … moves</Text>
+          <Segmented
+            options={PHANTOM_LOCK}
+            value={settings.phantomLockMoves}
+            onChange={(n) => onChange({ phantomLockMoves: n })}
+            label={(n) => `${n}`}
+          />
+          <Text style={styles.subsection}>At most … phantoms at once</Text>
+          <Segmented
+            options={PHANTOM_MAX}
+            value={settings.phantomMax}
+            onChange={(n) => onChange({ phantomMax: n })}
+            label={(n) => `${n}`}
+          />
+          <Text style={styles.subsection}>Fade speed</Text>
+          <Segmented
+            options={PHANTOM_FADE_MS}
+            value={settings.phantomFadeMs}
+            onChange={(n) => onChange({ phantomFadeMs: n })}
+            label={(n) => (n === 2000 ? 'Fast' : n === 4000 ? 'Normal' : 'Slow')}
+          />
+          <View style={{ height: 8 }} />
+          <Row
+            label="Mark phantom cells"
+            hint="Show a ghost and the moves left on locked cells. Turn off to track them purely from memory."
+            value={settings.phantomMarkers}
+            onChange={(v) => onChange({ phantomMarkers: v })}
+          />
+        </>
+      ) : null}
+
       <Text style={styles.section}>Assistance</Text>
       <Row
         label="Highlight conflicts"
@@ -152,6 +217,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginTop: 18,
     marginBottom: 8,
+  },
+  subsection: {
+    fontSize: 13,
+    color: colors.text,
+    marginTop: 10,
+    marginBottom: 6,
   },
   sectionHint: {
     fontSize: 13,

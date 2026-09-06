@@ -3,9 +3,11 @@ import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-nativ
 import {
   CELLS,
   GameState,
+  Phantom,
   boxOf,
   colOf,
   findConflicts,
+  isLocked,
   mistakes,
   rowOf,
 } from '../engine';
@@ -19,6 +21,12 @@ interface Props {
 
 const SHIFT_MS = 420;
 
+/** Opacity a phantom's digit should have right now, given wall-clock time. */
+function fadeProgress(ph: Phantom, now: number): number {
+  if (ph.fadeMs <= 0) return 0;
+  return Math.max(0, Math.min(1, 1 - (now - ph.startedAt) / ph.fadeMs));
+}
+
 /**
  * The board is drawn in two layers. The bottom layer is one static, tappable
  * square per position and carries all position-based highlighting. The top
@@ -28,7 +36,41 @@ const SHIFT_MS = 420;
  */
 export default function Board({ state, size, onSelect }: Props) {
   const cell = size / 9;
-  const { tokens, values, given, notes, selected, settings } = state;
+  const { tokens, values, given, notes, selected, settings, phantoms, moves } = state;
+
+  // One fade-out animation per phantom, keyed by the phantom's id so it
+  // keeps running while the cell travels across the board during shifts.
+  const fades = useRef(new Map<number, Animated.Value>()).current;
+  const fadeFor = (ph: Phantom): Animated.Value => {
+    let v = fades.get(ph.id);
+    if (!v) {
+      v = new Animated.Value(fadeProgress(ph, Date.now()));
+      fades.set(ph.id, v);
+    }
+    return v;
+  };
+  useEffect(() => {
+    const live = new Set<number>();
+    const now = Date.now();
+    for (const ph of phantoms) {
+      if (!ph) continue;
+      live.add(ph.id);
+      const remaining = ph.startedAt + ph.fadeMs - now;
+      const v = fadeFor(ph);
+      if (remaining > 0) {
+        Animated.timing(v, {
+          toValue: 0,
+          duration: remaining,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+      } else {
+        v.setValue(0);
+      }
+    }
+    for (const id of [...fades.keys()]) if (!live.has(id)) fades.delete(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phantoms]);
 
   const positions = useRef<Animated.ValueXY[] | null>(null);
   if (positions.current === null) {
@@ -82,6 +124,7 @@ export default function Board({ state, size, onSelect }: Props) {
   const backgroundFor = (pos: number): string => {
     if (pos === selected) return colors.cellSelected;
     if (conflicts.has(pos)) return colors.cellConflict;
+    if (settings.phantomMarkers && isLocked(state, pos)) return colors.cellPhantom;
     if (selectedDigit !== 0 && values[pos] === selectedDigit) return colors.cellSameDigit;
     if (selected !== null) {
       if (rowOf(pos) === selRow || colOf(pos) === selCol || boxOf(pos) === selBox)
@@ -140,6 +183,9 @@ export default function Board({ state, size, onSelect }: Props) {
           const value = values[pos];
           const note = notes[pos];
           const v = positions.current![token];
+          const phantom = phantoms[pos];
+          const locked = phantom !== null && moves < phantom.unlockAtMove;
+          const fade = phantom ? fadeFor(phantom) : null;
           return (
             <Animated.View
               key={token}
@@ -152,7 +198,37 @@ export default function Board({ state, size, onSelect }: Props) {
                 },
               ]}
             >
-              {value !== 0 ? (
+              {phantom && fade ? (
+                <>
+                  <Animated.Text
+                    style={[
+                      styles.digit,
+                      styles.phantomDigit,
+                      {
+                        fontSize: cell * 0.58,
+                        color: phantom.wasGiven ? colors.given : colors.entry,
+                        fontWeight: phantom.wasGiven ? '700' : '500',
+                        opacity: fade,
+                      },
+                    ]}
+                  >
+                    {phantom.value}
+                  </Animated.Text>
+                  {settings.phantomMarkers && locked ? (
+                    <Animated.View
+                      style={[
+                        styles.marker,
+                        { opacity: fade.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) },
+                      ]}
+                    >
+                      <Text style={[styles.markerGlyph, { fontSize: cell * 0.42 }]}>◌</Text>
+                      <Text style={[styles.markerCount, { fontSize: cell * 0.26 }]}>
+                        {phantom.unlockAtMove - moves}
+                      </Text>
+                    </Animated.View>
+                  ) : null}
+                </>
+              ) : value !== 0 ? (
                 <Text
                   style={[
                     styles.digit,
@@ -213,6 +289,22 @@ const styles = StyleSheet.create({
   },
   digit: {
     fontVariant: ['tabular-nums'],
+  },
+  phantomDigit: {
+    position: 'absolute',
+  },
+  marker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerGlyph: {
+    color: colors.phantom,
+    lineHeight: undefined,
+  },
+  markerCount: {
+    color: colors.phantom,
+    fontWeight: '700',
+    marginTop: -2,
   },
   notes: {
     flexDirection: 'row',

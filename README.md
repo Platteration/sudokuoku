@@ -64,6 +64,31 @@ leave an unsolvable board, so the game never uses them. The tests in
 `src/engine/__tests__/transforms.test.ts` check every shift against this rule,
 including a 300-shift random sequence that must end still uniquely solvable.
 
+## Phantom challenge (optional)
+
+Switch it on in Settings for a memory workout on top of the shifting. Every N
+moves one filled cell becomes a **phantom**:
+
+- its digit fades out over a few seconds and leaves the board;
+- the cell locks for X moves. No value, note or hint can go in, so you have to
+  hold the digit in your head and keep reasoning with it while the board keeps
+  shifting;
+- once the lock lifts the cell is an ordinary empty cell. Put the digit back
+  from memory. A faded given counts too: the puzzle is only solved when every
+  cell, phantoms included, is filled correctly.
+
+Settings control which cells may fade (your entries, the givens, or both), how
+often a phantom appears, how long it stays locked, how many can exist at once,
+how fast the digit fades, and whether locked cells show a ghost marker with the
+moves left. Turn the marker off to track the phantoms purely from memory.
+
+Two guards keep the challenge fair. A phantom never appears while it would
+leave you with no empty, unlocked cell to play, and if a move ever does leave
+you stuck the locks release at once. The cap on concurrent phantoms means each
+move nets progress even at the most aggressive settings. Phantoms travel with
+shifts, undo brings the digit back, and the digit-shift relabels a fading digit
+like any other.
+
 Undo rewinds the shift together with the move. Settings let you pick which
 shift kinds are allowed, shift only every 2, 3 or 5 moves, and toggle
 conflict / mistake highlighting and animation. The game and its settings are
@@ -76,7 +101,7 @@ App.tsx                     entry: safe-area provider + game screen
 src/engine/rng.ts           seeded PRNG so games and shifts are reproducible
 src/engine/sudoku.ts        grid helpers, solver, uniqueness check, generator
 src/engine/transforms.ts    the shift kinds and how they permute the board
-src/engine/game.ts          game state + reducer (moves, shifts, undo, hints, win)
+src/engine/game.ts          game state + reducer (moves, shifts, phantoms, undo, hints, win)
 src/engine/__tests__/       vitest suites for all of the above
 src/components/Board.tsx    two-layer board; cells animate to their new spots
 src/components/*            number pad, controls, shift banner, sheets

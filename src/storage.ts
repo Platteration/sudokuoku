@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CELLS, GameState, Settings } from './engine';
+import { CELLS, DEFAULT_SETTINGS, GameState, Settings } from './engine';
 
 const GAME_KEY = 'sudokuoku:game:v1';
 
@@ -22,6 +22,21 @@ function looksLikeState(x: unknown): x is GameState {
   );
 }
 
+/** Fills in fields that older saves may lack. */
+function normalize(state: GameState): GameState {
+  return {
+    ...state,
+    settings: { ...DEFAULT_SETTINGS, ...state.settings },
+    phantoms:
+      Array.isArray(state.phantoms) && state.phantoms.length === CELLS
+        ? state.phantoms
+        : new Array(CELLS).fill(null),
+    lastPhantom: state.lastPhantom ?? null,
+    phantomCount: typeof state.phantomCount === 'number' ? state.phantomCount : 0,
+    history: Array.isArray(state.history) ? state.history : [],
+  };
+}
+
 export async function loadGame(): Promise<SavedGame | null> {
   try {
     const raw = await AsyncStorage.getItem(GAME_KEY);
@@ -29,7 +44,7 @@ export async function loadGame(): Promise<SavedGame | null> {
     const parsed = JSON.parse(raw) as Partial<SavedGame>;
     if (!looksLikeState(parsed.state)) return null;
     return {
-      state: parsed.state,
+      state: normalize(parsed.state),
       elapsed: typeof parsed.elapsed === 'number' ? parsed.elapsed : 0,
     };
   } catch {

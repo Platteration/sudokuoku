@@ -24,6 +24,7 @@ import {
   DEFAULT_SETTINGS,
   Difficulty,
   GameState,
+  isLocked,
   newGame,
   reduce,
   remainingCounts,
@@ -149,6 +150,10 @@ function Game({ initial }: { initial: Loaded }) {
 
   const playing = state.status === 'playing';
   const remaining = remainingCounts(state);
+  const selectedLocked = state.selected !== null && isLocked(state, state.selected);
+  const activePhantoms = state.phantoms.filter((ph) => ph !== null).length;
+  const phantomJustSpawned =
+    state.lastPhantom !== null && state.lastPhantom.createdAtMove === state.moves && activePhantoms > 0;
   const difficultyLabel =
     state.settings.difficulty[0].toUpperCase() + state.settings.difficulty.slice(1);
 
@@ -175,6 +180,20 @@ function Game({ initial }: { initial: Loaded }) {
 
       <ShiftBanner shift={state.lastShift} shiftCount={state.shiftCount} moves={state.moves} />
 
+      {state.settings.phantomMode ? (
+        <View style={styles.phantomLine}>
+          <Text style={styles.phantomText} numberOfLines={1}>
+            {phantomJustSpawned
+              ? `◌ A ${state.lastPhantom!.wasGiven ? 'given' : 'digit'} is fading. Locked for ${state.settings.phantomLockMoves} moves.`
+              : selectedLocked
+                ? '◌ This cell is locked. Remember what was here.'
+                : activePhantoms > 0
+                  ? `◌ ${activePhantoms} phantom${activePhantoms === 1 ? '' : 's'} on the board`
+                  : '◌ Phantom challenge on'}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.boardWrap}>
         <Board
           state={state}
@@ -200,7 +219,7 @@ function Game({ initial }: { initial: Loaded }) {
         <NumberPad
           remaining={remaining}
           notesMode={state.notesMode}
-          disabled={!playing || state.selected === null}
+          disabled={!playing || state.selected === null || selectedLocked}
           onDigit={(d) => send({ type: 'input', digit: d })}
         />
       </View>
@@ -320,6 +339,18 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 11,
     color: colors.textMuted,
+  },
+  phantomLine: {
+    marginTop: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.sm,
+    backgroundColor: colors.cellPhantom,
+  },
+  phantomText: {
+    color: colors.phantom,
+    fontSize: 13,
+    fontWeight: '600',
   },
   boardWrap: {
     flex: 1,

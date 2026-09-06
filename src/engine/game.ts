@@ -1,4 +1,4 @@
-import { createRng, randomSeed } from './rng';
+import { createRng, pick, randomSeed } from './rng';
 import {
   CELLS,
   Difficulty,
@@ -17,6 +17,8 @@ import {
   randomShift,
 } from './transforms';
 
+export type PhantomTarget = 'entries' | 'givens' | 'both';
+
 export interface Settings {
   difficulty: Difficulty;
   /** Which shift kinds may fire. */
@@ -29,6 +31,20 @@ export interface Settings {
   showMistakes: boolean;
   /** Animate cells sliding to their new spots. */
   animateShifts: boolean;
+  /** Phantom challenge: filled cells fade away and lock for a while. */
+  phantomMode: boolean;
+  /** Which filled cells may fade. */
+  phantomTarget: PhantomTarget;
+  /** A new phantom appears after every N moves. */
+  phantomEvery: number;
+  /** A phantom cell stays locked for this many moves. */
+  phantomLockMoves: number;
+  /** Never more than this many phantoms at once, so progress stays possible. */
+  phantomMax: number;
+  /** How long the digit takes to fade out visually, in milliseconds. */
+  phantomFadeMs: number;
+  /** Show a ghost marker (and moves-left count) on locked cells. */
+  phantomMarkers: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,7 +54,32 @@ export const DEFAULT_SETTINGS: Settings = {
   highlightConflicts: true,
   showMistakes: false,
   animateShifts: true,
+  phantomMode: false,
+  phantomTarget: 'both',
+  phantomEvery: 3,
+  phantomLockMoves: 5,
+  phantomMax: 3,
+  phantomFadeMs: 4000,
+  phantomMarkers: true,
 };
+
+/**
+ * A cell whose digit has faded away. The digit is gone from `values` the
+ * moment the phantom is created; the UI fades it out over `fadeMs` starting
+ * at `startedAt`. Until `unlockAtMove` nothing may be entered in the cell.
+ */
+export interface Phantom {
+  id: number;
+  /** The digit that faded, for the fade-out animation and for undo. */
+  value: number;
+  /** Whether the faded digit was one of the puzzle's givens. */
+  wasGiven: boolean;
+  /** Wall-clock time the fade started (ms since epoch). */
+  startedAt: number;
+  fadeMs: number;
+  createdAtMove: number;
+  unlockAtMove: number;
+}
 
 export interface ShiftEvent extends Shift {
   /** Move number after which the shift fired. */
@@ -55,6 +96,10 @@ interface Snapshot {
   moves: number;
   lastShift: ShiftEvent | null;
   shiftCount: number;
+  /** One entry per position; null where there is no phantom. */
+  phantoms: (Phantom | null)[];
+  lastPhantom: Phantom | null;
+  phantomCount: number;
 }
 
 export interface GameState extends Snapshot {
@@ -70,11 +115,11 @@ export interface GameState extends Snapshot {
 
 export type Action =
   | { type: 'select'; pos: number | null }
-  | { type: 'input'; digit: number }
-  | { type: 'erase' }
+  | { type: 'input'; digit: number; now?: number }
+  | { type: 'erase'; now?: number }
   | { type: 'toggleNotesMode' }
   | { type: 'undo' }
-  | { type: 'hint' }
+  | { type: 'hint'; now?: number }
   | { type: 'newGame'; settings?: Partial<Settings>; seed?: number }
   | { type: 'updateSettings'; settings: Partial<Settings> };
 
@@ -95,6 +140,9 @@ export function newGame(settings: Settings, seed: number = randomSeed()): GameSt
     moves: 0,
     lastShift: null,
     shiftCount: 0,
+    phantoms: new Array<Phantom | null>(CELLS).fill(null),
+    lastPhantom: null,
+    phantomCount: 0,
     notesMode: false,
     status: 'playing',
     history: [],
@@ -114,12 +162,103 @@ function snapshot(s: GameState): Snapshot {
     moves: s.moves,
     lastShift: s.lastShift,
     shiftCount: s.shiftCount,
+    phantoms: s.phantoms,
+    lastPhantom: s.lastPhantom,
+    phantomCount: s.phantomCount,
   };
 }
 
 /** Per-game RNG for shifts, advanced by move count so shifts are reproducible. */
 function shiftRng(state: GameState) {
   return createRng((state.seed ^ (state.moves * 0x9e3779b1)) >>> 0);
+}
+
+/** Separate stream for phantom picks so they never correlate with shifts. */
+function phantomRng(state: GameState) {
+  return createRng((state.seed ^ 0x5bd1e995 ^ (state.moves * 0x85ebca6b)) >>> 0);
+}
+
+/** True while nothing may be entered in the cell. */
+export function isLocked(state: GameState, pos: number): boolean {
+  const ph = state.phantoms[pos];
+  return ph !== null && state.moves < ph.unlockAtMove;
+}
+
+/** Empty cells the player is currently allowed to fill. */
+function playableEmptyCells(state: GameState): number {
+  let n = 0;
+  for (let p = 0; p < CELLS; p++) if (state.values[p] === 0 && !isLocked(state, p)) n++;
+  return n;
+}
+
+/**
+ * The player must always have somewhere to play, otherwise the locks could
+ * never run out. If a move leaves no empty unlocked cell, every phantom
+ * unlocks at once.
+ */
+function ensurePlayable(state: GameState): GameState {
+  if (playableEmptyCells(state) > 0) return state;
+  if (!state.phantoms.some((ph) => ph !== null)) return state;
+  return { ...state, phantoms: state.phantoms.map(() => null) };
+}
+
+/** Drops phantoms whose lock has run out. */
+function expirePhantoms(state: GameState): GameState {
+  if (!state.phantoms.some((ph) => ph !== null && state.moves >= ph.unlockAtMove)) return state;
+  return {
+    ...state,
+    phantoms: state.phantoms.map((ph) =>
+      ph !== null && state.moves >= ph.unlockAtMove ? null : ph,
+    ),
+  };
+}
+
+/**
+ * Turns one random eligible filled cell into a phantom: its digit leaves the
+ * board and the cell locks for `phantomLockMoves` moves. `exclude` is the
+ * cell the player just changed, which never fades on the same move.
+ */
+function spawnPhantom(state: GameState, exclude: number | null, now: number): GameState {
+  const { phantomTarget, phantomLockMoves, phantomFadeMs, phantomMax } = state.settings;
+  // Never take away the player's last playable cell.
+  if (playableEmptyCells(state) === 0) return state;
+  const active = state.phantoms.filter((ph) => ph !== null).length;
+  if (active >= Math.max(1, phantomMax)) return state;
+  const eligible: number[] = [];
+  for (let p = 0; p < CELLS; p++) {
+    if (p === exclude || state.values[p] === 0 || state.phantoms[p] !== null) continue;
+    if (phantomTarget === 'entries' && state.given[p]) continue;
+    if (phantomTarget === 'givens' && !state.given[p]) continue;
+    eligible.push(p);
+  }
+  if (eligible.length === 0) return state;
+  const pos = pick(phantomRng(state), eligible);
+  const phantom: Phantom = {
+    id: state.phantomCount + 1,
+    value: state.values[pos],
+    wasGiven: state.given[pos],
+    startedAt: now,
+    fadeMs: phantomFadeMs,
+    createdAtMove: state.moves,
+    unlockAtMove: state.moves + Math.max(1, phantomLockMoves),
+  };
+  const values = state.values.slice();
+  values[pos] = 0;
+  const given = state.given.slice();
+  given[pos] = false;
+  const notes = state.notes.slice();
+  notes[pos] = 0;
+  const phantoms = state.phantoms.slice();
+  phantoms[pos] = phantom;
+  return {
+    ...state,
+    values,
+    given,
+    notes,
+    phantoms,
+    lastPhantom: phantom,
+    phantomCount: state.phantomCount + 1,
+  };
 }
 
 /** Applies one shift to the whole board, keeping the selection on its cell. */
@@ -132,6 +271,9 @@ export function applyShift(state: GameState, shift: Shift): GameState {
     values: applyToGrid(state.values, shift),
     notes: applyToNotes(state.notes, shift),
     tokens: permute(state.tokens, shift),
+    phantoms: permute(state.phantoms, shift).map((ph) =>
+      ph === null ? null : { ...ph, value: shift.relabel[ph.value] },
+    ),
     selected: state.selected === null ? null : shift.dest[state.selected],
     lastShift: event,
     shiftCount: state.shiftCount + 1,
@@ -143,7 +285,12 @@ export function applyShift(state: GameState, shift: Shift): GameState {
  * Records a completed move: bumps the counter, checks for a win and,
  * if the game continues, maybe fires a shift.
  */
-function afterMove(prev: GameState, next: GameState): GameState {
+function afterMove(
+  prev: GameState,
+  next: GameState,
+  changed: number | null,
+  now: number,
+): GameState {
   const moves = prev.moves + 1;
   let s: GameState = {
     ...next,
@@ -154,6 +301,12 @@ function afterMove(prev: GameState, next: GameState): GameState {
   if (isComplete(s.values)) {
     return { ...s, status: 'won', selected: null };
   }
+  s = expirePhantoms(s);
+  if (s.settings.phantomMode) {
+    const cadence = Math.max(1, s.settings.phantomEvery);
+    if (moves % cadence === 0) s = spawnPhantom(s, changed, now);
+  }
+  s = ensurePlayable(s);
   const every = Math.max(1, s.settings.shiftEvery);
   if (moves % every === 0) {
     const shift = randomShift(shiftRng(s), s.settings.enabledShifts);
@@ -191,6 +344,7 @@ export function reduce(state: GameState, action: Action): GameState {
     case 'input': {
       const p = state.selected;
       if (state.status !== 'playing' || p === null || state.given[p]) return state;
+      if (isLocked(state, p)) return state;
       const d = action.digit;
       if (d < 1 || d > 9) return state;
       if (state.notesMode) {
@@ -204,12 +358,13 @@ export function reduce(state: GameState, action: Action): GameState {
       values[p] = d;
       const notes = state.notes.slice();
       notes[p] = 0;
-      return afterMove(state, { ...state, values, notes });
+      return afterMove(state, { ...state, values, notes }, p, action.now ?? Date.now());
     }
 
     case 'erase': {
       const p = state.selected;
       if (state.status !== 'playing' || p === null || state.given[p]) return state;
+      if (isLocked(state, p)) return state;
       if (state.values[p] === 0 && state.notes[p] === 0) return state;
       const values = state.values.slice();
       const notes = state.notes.slice();
@@ -217,23 +372,24 @@ export function reduce(state: GameState, action: Action): GameState {
       values[p] = 0;
       notes[p] = 0;
       if (!wasValue) return { ...state, notes, version: state.version + 1 };
-      return afterMove(state, { ...state, values, notes });
+      return afterMove(state, { ...state, values, notes }, p, action.now ?? Date.now());
     }
 
     case 'hint': {
       const p = state.selected;
       if (state.status !== 'playing' || p === null || state.given[p]) return state;
+      if (isLocked(state, p)) return state;
       if (state.values[p] === state.solution[p]) return state;
       const values = state.values.slice();
       values[p] = state.solution[p];
       const notes = state.notes.slice();
       notes[p] = 0;
-      return afterMove(state, {
-        ...state,
-        values,
-        notes,
-        hintsUsed: state.hintsUsed + 1,
-      });
+      return afterMove(
+        state,
+        { ...state, values, notes, hintsUsed: state.hintsUsed + 1 },
+        p,
+        action.now ?? Date.now(),
+      );
     }
   }
 }

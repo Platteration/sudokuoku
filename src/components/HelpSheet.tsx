@@ -34,6 +34,18 @@ export default function HelpSheet({ visible, onClose }: Props) {
         Shifts that would break that rule, like turning a single ring of cells or scrambling
         one box on its own, are never used.
       </Text>
+      <Text style={styles.h}>Phantom challenge (optional)</Text>
+      <Text style={styles.p}>
+        Turn it on in Settings and, every few moves, one filled cell fades away. The digit is
+        gone from the board and the cell locks for a number of moves: nothing can be entered
+        there, not even a note. Remember what was there, keep reasoning as if it were still
+        in place while the board keeps shifting, and put it back once the lock lifts. Givens
+        can fade too, and a faded given has to be refilled to finish the puzzle.
+      </Text>
+      <Text style={styles.p}>
+        Locked cells show a ghost with the moves left until they unlock. Switch the markers
+        off to track the phantoms purely from memory.
+      </Text>
       <Text style={styles.h}>Tips</Text>
       <Text style={styles.p}>• Your selection follows the cell it was on, so you can keep working there.</Text>
       <Text style={styles.p}>• Notes do not count as moves, so pencil freely.</Text>

@@ -19,6 +19,8 @@ export const colors = {
   cellPeer: '#e9ecf7',
   cellSameDigit: '#fde68a',
   cellConflict: '#fecaca',
+  cellPhantom: '#ede9fe',
+  phantom: '#7c3aed',
   shiftBanner: '#1c2130',
 };
 

@@ -44,6 +44,7 @@ export default function WinSheet({ visible, state, elapsed, onClose, onNewGame }
         <Stat label="Moves" value={String(state.moves)} />
         <Stat label="Shifts" value={String(state.shiftCount)} />
         <Stat label="Hints" value={String(state.hintsUsed)} />
+        {state.settings.phantomMode ? <Stat label="Phantoms" value={String(state.phantomCount)} /> : null}
       </View>
       <Text style={styles.meta}>
         {state.settings.difficulty[0].toUpperCase() + state.settings.difficulty.slice(1)} · seed {state.seed}
