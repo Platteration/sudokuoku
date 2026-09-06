@@ -1,0 +1,184 @@
+import { describe, expect, it } from 'vitest';
+import {
+  Action,
+  DEFAULT_SETTINGS,
+  GameState,
+  applyShift,
+  mistakes,
+  newGame,
+  reduce,
+  remainingCounts,
+} from '../game';
+import { CELLS, isComplete } from '../sudoku';
+import { rotateShift } from '../transforms';
+
+const run = (state: GameState, ...actions: Action[]) =>
+  actions.reduce(reduce, state);
+
+function firstEmpty(state: GameState): number {
+  return state.values.findIndex((v) => v === 0);
+}
+
+/** Every given, and every correct entry, should still match the solution. */
+function expectConsistent(state: GameState) {
+  for (let p = 0; p < CELLS; p++) {
+    if (state.given[p]) expect(state.values[p]).toBe(state.solution[p]);
+  }
+  expect(isComplete(state.solution)).toBe(true);
+  expect(new Set(state.tokens).size).toBe(CELLS);
+}
+
+describe('newGame', () => {
+  it('starts with givens equal to the solution and no shift yet', () => {
+    const s = newGame(DEFAULT_SETTINGS, 1);
+    expectConsistent(s);
+    expect(s.moves).toBe(0);
+    expect(s.lastShift).toBeNull();
+    expect(s.status).toBe('playing');
+  });
+});
+
+describe('moves and shifts', () => {
+  it('placing a digit counts as a move and fires a shift', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 2);
+    const p = firstEmpty(s0);
+    const s1 = run(s0, { type: 'select', pos: p }, { type: 'input', digit: 4 });
+    expect(s1.moves).toBe(1);
+    expect(s1.shiftCount).toBe(1);
+    expect(s1.lastShift).not.toBeNull();
+    expectConsistent(s1);
+  });
+
+  it('the entered digit travels with its cell and the selection follows it', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 2);
+    const p = firstEmpty(s0);
+    const token = s0.tokens[p];
+    const s1 = run(s0, { type: 'select', pos: p }, { type: 'input', digit: 4 });
+    const newPos = s1.tokens.indexOf(token);
+    expect(s1.values[newPos]).toBe(4);
+    expect(s1.selected).toBe(newPos);
+    expect(s1.lastShift!.dest[p]).toBe(newPos);
+  });
+
+  it('a correct entry stays correct after any number of shifts', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 3);
+    const p = firstEmpty(s0);
+    const token = s0.tokens[p];
+    let s = run(s0, { type: 'select', pos: p }, { type: 'input', digit: s0.solution[p] });
+    for (let i = 0; i < 20; i++) {
+      const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+      const where = s.tokens.indexOf(token);
+      expect(s.values[where]).toBe(s.solution[where]);
+      expect(mistakes(s).size).toBe(0);
+      expectConsistent(s);
+    }
+    expect(s.shiftCount).toBe(21);
+  });
+
+  it('honours shiftEvery', () => {
+    const s0 = newGame({ ...DEFAULT_SETTINGS, shiftEvery: 3 }, 4);
+    let s = s0;
+    for (let i = 0; i < 6; i++) {
+      const q = firstEmpty(s);
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: 1 + (i % 9) });
+    }
+    expect(s.moves).toBe(6);
+    expect(s.shiftCount).toBe(2);
+  });
+
+  it('does not shift when no kinds are enabled', () => {
+    const s0 = newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 5);
+    const p = firstEmpty(s0);
+    const s1 = run(s0, { type: 'select', pos: p }, { type: 'input', digit: 2 });
+    expect(s1.moves).toBe(1);
+    expect(s1.shiftCount).toBe(0);
+    expect(s1.tokens).toEqual(s0.tokens);
+  });
+
+  it('notes do not count as moves and move with their cell', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 6);
+    const p = firstEmpty(s0);
+    const token = s0.tokens[p];
+    const s1 = run(
+      s0,
+      { type: 'select', pos: p },
+      { type: 'toggleNotesMode' },
+      { type: 'input', digit: 7 },
+      { type: 'input', digit: 2 },
+    );
+    expect(s1.moves).toBe(0);
+    expect(s1.notes[p]).toBe((1 << 7) | (1 << 2));
+    const s2 = applyShift(s1, rotateShift(1));
+    expect(s2.notes[s2.tokens.indexOf(token)]).toBe((1 << 7) | (1 << 2));
+  });
+
+  it('cannot change a given cell', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 6);
+    const g = s0.given.indexOf(true);
+    const s1 = run(s0, { type: 'select', pos: g }, { type: 'input', digit: 9 }, { type: 'erase' });
+    expect(s1.values).toEqual(s0.values);
+    expect(s1.moves).toBe(0);
+  });
+
+  it('erase removes a value and counts as a move', () => {
+    const s0 = newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 6);
+    const p = firstEmpty(s0);
+    const s1 = run(s0, { type: 'select', pos: p }, { type: 'input', digit: 3 }, { type: 'erase' });
+    expect(s1.values[p]).toBe(0);
+    expect(s1.moves).toBe(2);
+  });
+});
+
+describe('undo', () => {
+  it('restores the board, its orientation and the selection', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 8);
+    const p = firstEmpty(s0);
+    const s1 = run(s0, { type: 'select', pos: p }, { type: 'input', digit: 5 });
+    const s2 = reduce(s1, { type: 'undo' });
+    expect(s2.values).toEqual(s0.values);
+    expect(s2.tokens).toEqual(s0.tokens);
+    expect(s2.solution).toEqual(s0.solution);
+    expect(s2.selected).toBe(p);
+    expect(s2.moves).toBe(0);
+    expect(s2.history).toHaveLength(0);
+  });
+
+  it('is a no-op with no history', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 8);
+    expect(reduce(s0, { type: 'undo' })).toBe(s0);
+  });
+});
+
+describe('hint and win', () => {
+  it('hint fills the solution digit for the selected cell', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 9);
+    const p = firstEmpty(s0);
+    const token = s0.tokens[p];
+    const s1 = run(s0, { type: 'select', pos: p }, { type: 'hint' });
+    const where = s1.tokens.indexOf(token);
+    expect(s1.values[where]).toBe(s1.solution[where]);
+    expect(s1.hintsUsed).toBe(1);
+  });
+
+  it('the game is won when the last cell is filled correctly, with no final shift', () => {
+    let s = newGame({ ...DEFAULT_SETTINGS, difficulty: 'easy' }, 10);
+    while (s.status === 'playing') {
+      const q = s.values.findIndex((v) => v === 0);
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+    }
+    expect(s.status).toBe('won');
+    expect(s.values).toEqual(s.solution);
+    expect(s.shiftCount).toBe(s.moves - 1);
+    expect(s.selected).toBeNull();
+    // input after winning is ignored
+    expect(reduce(s, { type: 'input', digit: 1 })).toBe(s);
+  });
+
+  it('tracks remaining counts per digit', () => {
+    const s0 = newGame(DEFAULT_SETTINGS, 9);
+    const counts = remainingCounts(s0);
+    const total = counts.reduce((a, b) => a + b, 0);
+    expect(total).toBe(s0.values.filter((v) => v === 0).length);
+  });
+});

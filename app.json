@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Sudokuoku",
+    "slug": "sudokuoku",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.platteration.sudokuoku"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3b5bdb",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.platteration.sudokuoku"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "description": "Sudoku that shifts under you after every move, and stays solvable.",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f4f5f9"
+    }
+  }
+}
