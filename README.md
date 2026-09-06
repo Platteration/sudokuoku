@@ -93,12 +93,42 @@ move nets progress even at the most aggressive settings. Phantoms travel with
 shifts, undo brings the digit back, and the digit-shift relabels a fading digit
 like any other.
 
+## Daily challenge, streaks and progression
+
+**Daily.** One puzzle per calendar day, seeded from the date so everyone plays
+the same board. Difficulty follows the weekday (Monday easy, Sunday expert)
+and Wednesday and Sunday are phantom days with the phantom challenge forced
+on. Shifts fire every move. You get one attempt with no restarts; the game
+can be left and resumed, and it survives app restarts. Finishing it produces a
+Wordle-style result card you can share:
+
+```
+Sudokuoku Daily 2026-09-09 · Medium · Phantom day
+⏱ 12:34 · 60 moves · 59 shifts · 👻 4/5 · no hints
+🔥 5 day streak · +210 XP
+```
+
+**Streaks.** Consecutive days with the daily completed. Today counts as soon
+as it is done; missing a day resets the streak. Best streak is kept.
+
+**XP and levels.** Each win earns a base by difficulty (50 / 100 / 175 / 275),
+plus one XP per shift survived (capped at 100), 10 per phantom recalled, minus
+15 per hint, and a 1.5× multiplier for the daily. Level `n` starts at
+`100·(n−1)²` XP, with titles from Newcomer through Ring Walker and Phantom
+Whisperer to Sudokuoku Sage.
+
+**Badges.** Two dozen milestones across wins, shifts, phantoms, dailies and
+play style, for example Unshakeable (win an expert game), Storm Rider (survive
+1,000 shifts), Total Recall (five phantoms, no misses), Blindfold (phantom win
+with markers off) and One Week (7 day streak). New badges are announced on
+the win sheet; the Progress sheet shows them all with the per-difficulty
+statistics, level bar and streak.
+
 Undo rewinds the shift together with the move. Settings let you pick which
 shift kinds are allowed, shift only every 2, 3 or 5 moves, choose a light,
 dark or system appearance, and toggle conflict / mistake highlighting and
-animation. The game and its settings are saved locally so you can pick up
-where you left off, and a statistics sheet keeps games played and won, best
-time and fewest shifts per difficulty, plus your lifetime phantom recall rate.
+animation. Everything is saved locally: the free game, the daily in progress,
+and the profile with statistics, XP, badges and daily history.
 
 ## Code layout
 
@@ -108,10 +138,11 @@ src/engine/rng.ts           seeded PRNG so games and shifts are reproducible
 src/engine/sudoku.ts        grid helpers, solver, uniqueness check, generator
 src/engine/transforms.ts    the shift kinds and how they permute the board
 src/engine/game.ts          game state + reducer (moves, shifts, phantoms, undo, hints, win)
+src/engine/progress.ts      daily challenge, streaks, XP, levels and badges
 src/engine/__tests__/       vitest suites for all of the above
 src/components/Board.tsx    two-layer board; cells animate to their new spots
 src/components/*            number pad, controls, shift banner, sheets
-src/screens/GameScreen.tsx  wires the reducer, timer, persistence, stats and sheets
-src/storage.ts              AsyncStorage save/load for the game, stats and flags
+src/screens/GameScreen.tsx  wires the reducer, timer, persistence, profile, free/daily switching and sheets
+src/storage.ts              AsyncStorage save/load for both games, the profile and flags
 src/theme.tsx               light/dark palettes, ThemeProvider, useStyles
 ```

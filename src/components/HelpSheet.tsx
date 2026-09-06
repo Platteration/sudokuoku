@@ -47,6 +47,20 @@ export default function HelpSheet({ visible, onClose }: Props) {
         Locked cells show a ghost with the moves left until they unlock. Switch the markers
         off to track the phantoms purely from memory.
       </Text>
+      <Text style={styles.h}>Daily challenge and streaks</Text>
+      <Text style={styles.p}>
+        Every day there is one shared puzzle, the same for everyone, reached from the calendar
+        button. Difficulty follows the weekday, and on Wednesdays and Sundays digits fade away
+        too. You get one attempt with no restarts, though you can leave and come back. Finish it
+        to extend your streak, and share the result card with friends.
+      </Text>
+      <Text style={styles.h}>XP, levels and badges</Text>
+      <Text style={styles.p}>
+        Every win earns XP: more for harder boards, a bonus for the shifts you survived and the
+        digits you recalled, a small penalty per hint, and half again for the daily. XP raises
+        your level and title, and milestones unlock badges. The trophy button shows all of it,
+        together with your statistics.
+      </Text>
       <Text style={styles.h}>Tips</Text>
       <Text style={styles.p}>• Your selection follows the cell it was on, so you can keep working there.</Text>
       <Text style={styles.p}>• Notes do not count as moves, so pencil freely.</Text>

@@ -1,99 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CELLS, DEFAULT_SETTINGS, Difficulty, GameState, Settings } from './engine';
+import { CELLS, DEFAULT_SETTINGS, GameState, Profile, normalizeProfile } from './engine';
 
-const GAME_KEY = 'sudokuoku:game:v1';
+const FREE_GAME_KEY = 'sudokuoku:game:v1';
+const DAILY_GAME_KEY = 'sudokuoku:daily:v1';
+const PROFILE_KEY = 'sudokuoku:profile:v1';
+const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
 const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
-const STATS_KEY = 'sudokuoku:stats:v1';
-
-export interface DifficultyStats {
-  played: number;
-  won: number;
-  /** Fastest win in seconds, or null if never won. */
-  bestTime: number | null;
-  /** Fewest shifts endured in a win, or null. */
-  fewestShifts: number | null;
-  /** Lifetime phantom recall tally across wins. */
-  phantomsRecalled: number;
-  phantomsMissed: number;
-}
-
-export type Stats = Record<Difficulty, DifficultyStats>;
-
-const EMPTY_DIFFICULTY: DifficultyStats = {
-  played: 0,
-  won: 0,
-  bestTime: null,
-  fewestShifts: null,
-  phantomsRecalled: 0,
-  phantomsMissed: 0,
-};
-
-export const EMPTY_STATS: Stats = {
-  easy: { ...EMPTY_DIFFICULTY },
-  medium: { ...EMPTY_DIFFICULTY },
-  hard: { ...EMPTY_DIFFICULTY },
-  expert: { ...EMPTY_DIFFICULTY },
-};
-
-export async function loadStats(): Promise<Stats> {
-  try {
-    const raw = await AsyncStorage.getItem(STATS_KEY);
-    if (!raw) return EMPTY_STATS;
-    const parsed = JSON.parse(raw) as Partial<Stats>;
-    const out: Stats = { ...EMPTY_STATS };
-    for (const d of Object.keys(EMPTY_STATS) as Difficulty[]) {
-      out[d] = { ...EMPTY_DIFFICULTY, ...(parsed[d] ?? {}) };
-    }
-    return out;
-  } catch {
-    return EMPTY_STATS;
-  }
-}
-
-export async function saveStats(stats: Stats): Promise<void> {
-  try {
-    await AsyncStorage.setItem(STATS_KEY, JSON.stringify(stats));
-  } catch {
-    // best-effort
-  }
-}
-
-/** Pure helper: folds one game's start into the stats. */
-export function recordStart(stats: Stats, difficulty: Difficulty): Stats {
-  const d = stats[difficulty];
-  return { ...stats, [difficulty]: { ...d, played: d.played + 1 } };
-}
-
-/** Pure helper: folds one won game into the stats. */
-export function recordWin(stats: Stats, state: GameState, elapsed: number): Stats {
-  const difficulty = state.settings.difficulty;
-  const d = stats[difficulty];
-  return {
-    ...stats,
-    [difficulty]: {
-      ...d,
-      won: d.won + 1,
-      bestTime: d.bestTime === null ? elapsed : Math.min(d.bestTime, elapsed),
-      fewestShifts:
-        d.fewestShifts === null ? state.shiftCount : Math.min(d.fewestShifts, state.shiftCount),
-      phantomsRecalled: d.phantomsRecalled + state.phantomsRecalled,
-      phantomsMissed: d.phantomsMissed + state.phantomsMissed,
-    },
-  };
-}
-
-export async function clearStats(): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(STATS_KEY);
-  } catch {
-    // best-effort
-  }
-}
-
-export interface SavedGame {
-  state: GameState;
-  elapsed: number;
-}
 
 function looksLikeState(x: unknown): x is GameState {
   if (!x || typeof x !== 'object') return false;
@@ -110,10 +22,18 @@ function looksLikeState(x: unknown): x is GameState {
 }
 
 /** Fills in fields that older saves may lack. */
-function normalize(state: GameState): GameState {
+function normalize(state: GameState, legacyElapsed?: number): GameState {
   return {
     ...state,
     settings: { ...DEFAULT_SETTINGS, ...state.settings },
+    mode: state.mode === 'daily' ? 'daily' : 'free',
+    dailyKey: typeof state.dailyKey === 'string' ? state.dailyKey : null,
+    elapsed:
+      typeof state.elapsed === 'number'
+        ? state.elapsed
+        : typeof legacyElapsed === 'number'
+          ? legacyElapsed
+          : 0,
     phantoms:
       Array.isArray(state.phantoms) && state.phantoms.length === CELLS
         ? state.phantoms
@@ -126,26 +46,72 @@ function normalize(state: GameState): GameState {
   };
 }
 
-export async function loadGame(): Promise<SavedGame | null> {
+async function loadState(key: string): Promise<GameState | null> {
   try {
-    const raw = await AsyncStorage.getItem(GAME_KEY);
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<SavedGame>;
-    if (!looksLikeState(parsed.state)) return null;
-    return {
-      state: normalize(parsed.state),
-      elapsed: typeof parsed.elapsed === 'number' ? parsed.elapsed : 0,
-    };
+    const parsed = JSON.parse(raw) as { state?: unknown; elapsed?: number };
+    // Older saves wrapped the state as { state, elapsed }.
+    const candidate = looksLikeState(parsed) ? parsed : parsed.state;
+    if (!looksLikeState(candidate)) return null;
+    return normalize(candidate, parsed.elapsed);
   } catch {
     return null;
   }
 }
 
-export async function saveGame(saved: SavedGame): Promise<void> {
+async function saveState(key: string, state: GameState): Promise<void> {
   try {
-    await AsyncStorage.setItem(GAME_KEY, JSON.stringify(saved));
+    await AsyncStorage.setItem(key, JSON.stringify(state));
   } catch {
     // Persisting is best-effort; the game keeps working without it.
+  }
+}
+
+export const loadGame = () => loadState(FREE_GAME_KEY);
+export const saveGame = (state: GameState) => saveState(FREE_GAME_KEY, state);
+export const loadDailyGame = () => loadState(DAILY_GAME_KEY);
+export const saveDailyGame = (state: GameState) => saveState(DAILY_GAME_KEY, state);
+
+export async function clearDailyGame(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(DAILY_GAME_KEY);
+  } catch {
+    // best-effort
+  }
+}
+
+export async function loadProfile(): Promise<Profile> {
+  try {
+    const raw = await AsyncStorage.getItem(PROFILE_KEY);
+    if (raw) return normalizeProfile(JSON.parse(raw));
+    // One-time migration from the older stats-only store.
+    const legacy = await AsyncStorage.getItem(LEGACY_STATS_KEY);
+    if (legacy) {
+      const profile = normalizeProfile({ stats: JSON.parse(legacy) });
+      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+      await AsyncStorage.removeItem(LEGACY_STATS_KEY);
+      return profile;
+    }
+    return normalizeProfile(null);
+  } catch {
+    return normalizeProfile(null);
+  }
+}
+
+export async function saveProfile(profile: Profile): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  } catch {
+    // best-effort
+  }
+}
+
+export async function clearProfile(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(PROFILE_KEY);
+  } catch {
+    // best-effort
   }
 }
 
@@ -164,5 +130,3 @@ export async function markHelpSeen(): Promise<void> {
     // best-effort
   }
 }
-
-export type { Settings };

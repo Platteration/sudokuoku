@@ -1,0 +1,419 @@
+/**
+ * Daily challenge, streaks, XP, levels and badges. Pure functions over a
+ * persisted Profile so everything here is testable without the UI.
+ */
+import { GameState, Settings } from './game';
+import { Difficulty } from './sudoku';
+import { ALL_SHIFT_KINDS } from './transforms';
+
+// ---------------------------------------------------------------------------
+// Daily challenge
+
+/** Local calendar day as YYYY-MM-DD. */
+export function dateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function parseDateKey(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+export function shiftDateKey(key: string, days: number): string {
+  const d = parseDateKey(key);
+  d.setDate(d.getDate() + days);
+  return dateKey(d);
+}
+
+/** FNV-1a hash of the key, so every player gets the same board on a day. */
+export function dailySeed(key: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h ^ 0x5d0d0c0) >>> 0;
+}
+
+export interface DailyConfig {
+  key: string;
+  difficulty: Difficulty;
+  /** Phantom days force the phantom challenge on. */
+  phantom: boolean;
+  /** Short label such as "Hard · Phantom day". */
+  label: string;
+}
+
+const WEEKDAY_DIFFICULTY: Difficulty[] = [
+  'expert', // Sunday
+  'easy',
+  'medium',
+  'medium',
+  'hard',
+  'medium',
+  'hard',
+];
+
+export function dailyConfig(key: string): DailyConfig {
+  const day = parseDateKey(key).getDay();
+  const difficulty = WEEKDAY_DIFFICULTY[day];
+  const phantom = day === 0 || day === 3;
+  const cap = difficulty[0].toUpperCase() + difficulty.slice(1);
+  return { key, difficulty, phantom, label: phantom ? `${cap} · Phantom day` : cap };
+}
+
+/** The settings a daily game is played with: fixed rules, the player's assists. */
+export function dailySettings(base: Settings, config: DailyConfig): Settings {
+  return {
+    ...base,
+    difficulty: config.difficulty,
+    enabledShifts: ALL_SHIFT_KINDS.filter((k) => k !== 'relabel'),
+    shiftEvery: 1,
+    phantomMode: config.phantom,
+    phantomTarget: 'both',
+    phantomEvery: 3,
+    phantomLockMoves: 5,
+    phantomMax: 3,
+  };
+}
+
+export interface DailyResult {
+  key: string;
+  difficulty: Difficulty;
+  phantom: boolean;
+  elapsed: number;
+  moves: number;
+  shifts: number;
+  hints: number;
+  phantomsRecalled: number;
+  phantomsMissed: number;
+  xp: number;
+}
+
+/** Consecutive completed dailies ending today, or yesterday if today is open. */
+export function currentStreak(daily: Record<string, DailyResult>, todayKey: string): number {
+  let key = daily[todayKey] ? todayKey : shiftDateKey(todayKey, -1);
+  let n = 0;
+  while (daily[key]) {
+    n++;
+    key = shiftDateKey(key, -1);
+  }
+  return n;
+}
+
+export function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Wordle-style share text. */
+export function shareText(result: DailyResult, streak: number): string {
+  const cfg = dailyConfig(result.key);
+  const lines = [
+    `Sudokuoku Daily ${result.key} · ${cfg.label}`,
+    `⏱ ${formatClock(result.elapsed)} · ${result.moves} moves · ${result.shifts} shifts` +
+      (result.phantom ? ` · 👻 ${result.phantomsRecalled}/${result.phantomsRecalled + result.phantomsMissed}` : '') +
+      (result.hints > 0 ? ` · 💡 ${result.hints}` : ' · no hints'),
+    `🔥 ${streak} day streak · +${result.xp} XP`,
+  ];
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// XP and levels
+
+const BASE_XP: Record<Difficulty, number> = {
+  easy: 50,
+  medium: 100,
+  hard: 175,
+  expert: 275,
+};
+
+/** XP for a won game. */
+export function xpForWin(state: GameState): number {
+  const base = BASE_XP[state.settings.difficulty];
+  const shifts = Math.min(100, state.shiftCount);
+  const recalls = state.phantomsRecalled * 10;
+  const hints = state.hintsUsed * 15;
+  const raw = base + shifts + recalls - hints;
+  const withDaily = state.mode === 'daily' ? Math.round(raw * 1.5) : raw;
+  return Math.max(10, withDaily);
+}
+
+const TITLES: [number, string][] = [
+  [1, 'Newcomer'],
+  [2, 'Apprentice'],
+  [3, 'Shifter'],
+  [5, 'Ring Walker'],
+  [8, 'Band Bender'],
+  [12, 'Phantom Whisperer'],
+  [16, 'Grid Master'],
+  [20, 'Sudokuoku Sage'],
+];
+
+export interface LevelInfo {
+  level: number;
+  title: string;
+  /** XP accumulated inside the current level. */
+  into: number;
+  /** XP needed to finish the current level. */
+  span: number;
+  /** Total XP at which the next level starts. */
+  nextAt: number;
+}
+
+/** Total XP needed to reach `level` (level 1 starts at 0). */
+export function xpForLevel(level: number): number {
+  return 100 * (level - 1) * (level - 1);
+}
+
+export function levelInfo(xp: number): LevelInfo {
+  const level = Math.floor(Math.sqrt(Math.max(0, xp) / 100)) + 1;
+  const start = xpForLevel(level);
+  const nextAt = xpForLevel(level + 1);
+  let title = TITLES[0][1];
+  for (const [min, t] of TITLES) if (level >= min) title = t;
+  return { level, title, into: xp - start, span: nextAt - start, nextAt };
+}
+
+// ---------------------------------------------------------------------------
+// Profile
+
+export interface DifficultyStats {
+  played: number;
+  won: number;
+  bestTime: number | null;
+  fewestShifts: number | null;
+  phantomsRecalled: number;
+  phantomsMissed: number;
+}
+
+export type Stats = Record<Difficulty, DifficultyStats>;
+
+export interface Totals {
+  played: number;
+  won: number;
+  shifts: number;
+  phantomsRecalled: number;
+  phantomsMissed: number;
+  hintlessWins: number;
+  dailiesCompleted: number;
+}
+
+export interface Profile {
+  version: 1;
+  xp: number;
+  /** Badge id -> ISO timestamp of unlock. */
+  badges: Record<string, string>;
+  stats: Stats;
+  totals: Totals;
+  daily: Record<string, DailyResult>;
+  bestStreak: number;
+}
+
+const EMPTY_DIFFICULTY: DifficultyStats = {
+  played: 0,
+  won: 0,
+  bestTime: null,
+  fewestShifts: null,
+  phantomsRecalled: 0,
+  phantomsMissed: 0,
+};
+
+export function emptyStats(): Stats {
+  return {
+    easy: { ...EMPTY_DIFFICULTY },
+    medium: { ...EMPTY_DIFFICULTY },
+    hard: { ...EMPTY_DIFFICULTY },
+    expert: { ...EMPTY_DIFFICULTY },
+  };
+}
+
+export function emptyProfile(): Profile {
+  return {
+    version: 1,
+    xp: 0,
+    badges: {},
+    stats: emptyStats(),
+    totals: {
+      played: 0,
+      won: 0,
+      shifts: 0,
+      phantomsRecalled: 0,
+      phantomsMissed: 0,
+      hintlessWins: 0,
+      dailiesCompleted: 0,
+    },
+    daily: {},
+    bestStreak: 0,
+  };
+}
+
+/** Fills in anything an older or partial profile lacks. */
+export function normalizeProfile(raw: unknown): Profile {
+  const empty = emptyProfile();
+  if (!raw || typeof raw !== 'object') return empty;
+  const p = raw as Partial<Profile>;
+  const stats = emptyStats();
+  for (const d of Object.keys(stats) as Difficulty[]) {
+    stats[d] = { ...EMPTY_DIFFICULTY, ...(p.stats?.[d] ?? {}) };
+  }
+  return {
+    version: 1,
+    xp: typeof p.xp === 'number' ? p.xp : 0,
+    badges: p.badges && typeof p.badges === 'object' ? p.badges : {},
+    stats,
+    totals: { ...empty.totals, ...(p.totals ?? {}) },
+    daily: p.daily && typeof p.daily === 'object' ? p.daily : {},
+    bestStreak: typeof p.bestStreak === 'number' ? p.bestStreak : 0,
+  };
+}
+
+export function recordGameStart(profile: Profile, difficulty: Difficulty): Profile {
+  const d = profile.stats[difficulty];
+  return {
+    ...profile,
+    stats: { ...profile.stats, [difficulty]: { ...d, played: d.played + 1 } },
+    totals: { ...profile.totals, played: profile.totals.played + 1 },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Badges
+
+export interface Badge {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  /** Group used to order the badge grid. */
+  group: 'wins' | 'shifts' | 'phantom' | 'daily' | 'style';
+}
+
+interface WinContext {
+  state: GameState;
+  profile: Profile; // already updated with this win
+  streak: number;
+}
+
+type Check = (ctx: WinContext) => boolean;
+
+const defs: [Badge, Check][] = [
+  [{ id: 'first-win', title: 'First Light', description: 'Win your first game.', icon: '✨', group: 'wins' }, ({ profile }) => profile.totals.won >= 1],
+  [{ id: 'wins-10', title: 'Regular', description: 'Win 10 games.', icon: '🔟', group: 'wins' }, ({ profile }) => profile.totals.won >= 10],
+  [{ id: 'wins-50', title: 'Veteran', description: 'Win 50 games.', icon: '🎖', group: 'wins' }, ({ profile }) => profile.totals.won >= 50],
+  [{ id: 'wins-100', title: 'Centurion', description: 'Win 100 games.', icon: '💯', group: 'wins' }, ({ profile }) => profile.totals.won >= 100],
+  [{ id: 'win-hard', title: 'Hard Headed', description: 'Win a hard game.', icon: '🪨', group: 'wins' }, ({ profile }) => profile.stats.hard.won >= 1],
+  [{ id: 'win-expert', title: 'Unshakeable', description: 'Win an expert game.', icon: '🏔', group: 'wins' }, ({ profile }) => profile.stats.expert.won >= 1],
+  [{ id: 'all-difficulties', title: 'Full Spectrum', description: 'Win at every difficulty.', icon: '🌈', group: 'wins' }, ({ profile }) => (['easy', 'medium', 'hard', 'expert'] as Difficulty[]).every((d) => profile.stats[d].won >= 1)],
+  [{ id: 'speed', title: 'Quick Hands', description: 'Win a medium or harder game in under 10 minutes.', icon: '⚡', group: 'wins' }, ({ state }) => state.settings.difficulty !== 'easy' && state.elapsed < 600],
+  [{ id: 'no-hints', title: 'Unassisted', description: 'Win without using a hint.', icon: '🧠', group: 'style' }, ({ state }) => state.hintsUsed === 0],
+  [{ id: 'hintless-10', title: 'Self Reliant', description: 'Win 10 games without hints.', icon: '🦉', group: 'style' }, ({ profile }) => profile.totals.hintlessWins >= 10],
+  [{ id: 'shifts-100', title: 'Sea Legs', description: 'Survive 100 shifts in total.', icon: '🌊', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 100],
+  [{ id: 'shifts-1000', title: 'Storm Rider', description: 'Survive 1,000 shifts in total.', icon: '🌀', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 1000],
+  [{ id: 'shifts-5000', title: 'Tectonic', description: 'Survive 5,000 shifts in total.', icon: '🌋', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 5000],
+  [{ id: 'all-shifts', title: 'Everything Moves', description: 'Win with every shift kind enabled, digit shift included.', icon: '🎡', group: 'shifts' }, ({ state }) => ALL_SHIFT_KINDS.every((k) => state.settings.enabledShifts.includes(k))],
+  [{ id: 'relabel', title: 'Renumbered', description: 'Win with the digit shift enabled.', icon: '🔢', group: 'shifts' }, ({ state }) => state.settings.enabledShifts.includes('relabel')],
+  [{ id: 'phantom-first', title: 'Ghost Story', description: 'Recall a faded digit correctly.', icon: '👻', group: 'phantom' }, ({ profile }) => profile.totals.phantomsRecalled >= 1],
+  [{ id: 'phantom-perfect', title: 'Total Recall', description: 'Win with five or more phantoms and no misses.', icon: '🧿', group: 'phantom' }, ({ state }) => state.phantomCount >= 5 && state.phantomsMissed === 0 && state.phantomsRecalled >= 5],
+  [{ id: 'phantom-blind', title: 'Blindfold', description: 'Win a phantom game with the markers switched off.', icon: '🕶', group: 'phantom' }, ({ state }) => state.settings.phantomMode && !state.settings.phantomMarkers && state.phantomCount >= 3],
+  [{ id: 'phantom-100', title: 'Medium', description: 'Recall 100 faded digits in total.', icon: '🔮', group: 'phantom' }, ({ profile }) => profile.totals.phantomsRecalled >= 100],
+  [{ id: 'daily-first', title: 'Day One', description: 'Complete a daily challenge.', icon: '📅', group: 'daily' }, ({ profile }) => profile.totals.dailiesCompleted >= 1],
+  [{ id: 'streak-3', title: 'Warming Up', description: 'Keep a 3 day streak.', icon: '🔥', group: 'daily' }, ({ streak }) => streak >= 3],
+  [{ id: 'streak-7', title: 'One Week', description: 'Keep a 7 day streak.', icon: '📆', group: 'daily' }, ({ streak }) => streak >= 7],
+  [{ id: 'streak-30', title: 'Habit', description: 'Keep a 30 day streak.', icon: '🏆', group: 'daily' }, ({ streak }) => streak >= 30],
+  [{ id: 'daily-phantom', title: 'Sunday Séance', description: 'Complete a phantom day daily.', icon: '🕯', group: 'daily' }, ({ state }) => state.mode === 'daily' && state.settings.phantomMode],
+];
+
+export const BADGES: Badge[] = defs.map(([b]) => b);
+
+export interface WinOutcome {
+  profile: Profile;
+  xpGained: number;
+  newBadges: Badge[];
+  leveledUp: boolean;
+  streak: number;
+}
+
+/**
+ * Folds a won game into the profile: stats, totals, XP, daily result and
+ * any badges that just unlocked. `now` is the moment of the win.
+ */
+export function recordGameWin(profile: Profile, state: GameState, now: Date): WinOutcome {
+  const difficulty = state.settings.difficulty;
+  const d = profile.stats[difficulty];
+  const xpGained = xpForWin(state);
+  const before = levelInfo(profile.xp).level;
+
+  let next: Profile = {
+    ...profile,
+    xp: profile.xp + xpGained,
+    stats: {
+      ...profile.stats,
+      [difficulty]: {
+        ...d,
+        won: d.won + 1,
+        bestTime: d.bestTime === null ? state.elapsed : Math.min(d.bestTime, state.elapsed),
+        fewestShifts:
+          d.fewestShifts === null ? state.shiftCount : Math.min(d.fewestShifts, state.shiftCount),
+        phantomsRecalled: d.phantomsRecalled + state.phantomsRecalled,
+        phantomsMissed: d.phantomsMissed + state.phantomsMissed,
+      },
+    },
+    totals: {
+      ...profile.totals,
+      won: profile.totals.won + 1,
+      shifts: profile.totals.shifts + state.shiftCount,
+      phantomsRecalled: profile.totals.phantomsRecalled + state.phantomsRecalled,
+      phantomsMissed: profile.totals.phantomsMissed + state.phantomsMissed,
+      hintlessWins: profile.totals.hintlessWins + (state.hintsUsed === 0 ? 1 : 0),
+    },
+  };
+
+  if (state.mode === 'daily' && state.dailyKey && !next.daily[state.dailyKey]) {
+    const result: DailyResult = {
+      key: state.dailyKey,
+      difficulty,
+      phantom: state.settings.phantomMode,
+      elapsed: state.elapsed,
+      moves: state.moves,
+      shifts: state.shiftCount,
+      hints: state.hintsUsed,
+      phantomsRecalled: state.phantomsRecalled,
+      phantomsMissed: state.phantomsMissed,
+      xp: xpGained,
+    };
+    next = {
+      ...next,
+      daily: { ...next.daily, [state.dailyKey]: result },
+      totals: { ...next.totals, dailiesCompleted: next.totals.dailiesCompleted + 1 },
+    };
+  }
+
+  const streak = currentStreak(next.daily, state.dailyKey ?? dateKey(now));
+  next = { ...next, bestStreak: Math.max(next.bestStreak, streak) };
+
+  const ctx: WinContext = { state, profile: next, streak };
+  const newBadges: Badge[] = [];
+  const badges = { ...next.badges };
+  for (const [badge, check] of defs) {
+    if (badges[badge.id]) continue;
+    if (check(ctx)) {
+      badges[badge.id] = now.toISOString();
+      newBadges.push(badge);
+    }
+  }
+  next = { ...next, badges };
+
+  return {
+    profile: next,
+    xpGained,
+    newBadges,
+    leveledUp: levelInfo(next.xp).level > before,
+    streak,
+  };
+}

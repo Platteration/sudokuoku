@@ -16,9 +16,12 @@ import Sheet from './Sheet';
 interface Props {
   visible: boolean;
   settings: Settings;
+  /** The daily challenge is on screen: its rules cannot be changed. */
+  daily: boolean;
   onClose: () => void;
   onChange: (patch: Partial<Settings>) => void;
   onNewGame: (difficulty: Difficulty) => void;
+  onHelp: () => void;
 }
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
@@ -81,7 +84,7 @@ function Row({ label, hint, value, onChange }: { label: string; hint?: string; v
   );
 }
 
-export default function SettingsSheet({ visible, settings, onClose, onChange, onNewGame }: Props) {
+export default function SettingsSheet({ visible, settings, daily, onClose, onChange, onNewGame, onHelp }: Props) {
   const styles = useStyles(makeStyles);
   const [difficulty, setDifficulty] = useState<Difficulty>(settings.difficulty);
 
@@ -107,7 +110,25 @@ export default function SettingsSheet({ visible, settings, onClose, onChange, on
         />
       }
     >
-      <Text style={styles.section}>Difficulty for the next game</Text>
+      <PrimaryButton
+        label="How to play"
+        variant="secondary"
+        onPress={() => {
+          onClose();
+          onHelp();
+        }}
+      />
+
+      {daily ? (
+        <View style={styles.dailyNote}>
+          <Text style={styles.dailyNoteText}>
+            The daily challenge uses fixed rules, so difficulty, shifts and the phantom
+            challenge cannot be changed while it is on screen. Appearance and assistance still apply.
+          </Text>
+        </View>
+      ) : null}
+
+      <Text style={styles.section}>Difficulty for the next free game</Text>
       <Segmented
         options={DIFFICULTIES}
         value={difficulty}
@@ -115,6 +136,8 @@ export default function SettingsSheet({ visible, settings, onClose, onChange, on
         label={(d) => d[0].toUpperCase() + d.slice(1)}
       />
 
+      {daily ? null : (
+        <>
       <Text style={styles.section}>Shift after every … moves</Text>
       <Segmented
         options={SHIFT_EVERY}
@@ -192,6 +215,9 @@ export default function SettingsSheet({ visible, settings, onClose, onChange, on
         </>
       ) : null}
 
+        </>
+      )}
+
       <Text style={styles.section}>Appearance</Text>
       <Segmented
         options={THEMES}
@@ -232,6 +258,16 @@ const makeStyles = (colors: Colors) =>
     letterSpacing: 0.6,
     marginTop: 18,
     marginBottom: 8,
+  },
+  dailyNote: {
+    marginTop: 12,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.md,
+    padding: 10,
+  },
+  dailyNoteText: {
+    fontSize: 13,
+    color: colors.text,
   },
   subsection: {
     fontSize: 13,

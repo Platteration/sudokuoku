@@ -116,9 +116,17 @@ interface Snapshot {
   phantomsMissed: number;
 }
 
+export type GameMode = 'free' | 'daily';
+
 export interface GameState extends Snapshot {
   seed: number;
   settings: Settings;
+  /** Free play, or the once-a-day shared puzzle. */
+  mode: GameMode;
+  /** Local calendar day (YYYY-MM-DD) for daily games, else null. */
+  dailyKey: string | null;
+  /** Seconds of play so far; advanced by 'tick'. */
+  elapsed: number;
   notesMode: boolean;
   status: 'playing' | 'won';
   history: Snapshot[];
@@ -134,17 +142,32 @@ export type Action =
   | { type: 'toggleNotesMode' }
   | { type: 'undo' }
   | { type: 'hint'; now?: number }
+  | { type: 'tick' }
   | { type: 'newGame'; settings?: Partial<Settings>; seed?: number }
-  | { type: 'updateSettings'; settings: Partial<Settings> };
+  | { type: 'updateSettings'; settings: Partial<Settings> }
+  /** Replaces the whole state, used when switching between saved games. */
+  | { type: 'load'; state: GameState };
 
 const MAX_HISTORY = 200;
 
-export function newGame(settings: Settings, seed: number = randomSeed()): GameState {
+export interface NewGameOptions {
+  mode?: GameMode;
+  dailyKey?: string | null;
+}
+
+export function newGame(
+  settings: Settings,
+  seed: number = randomSeed(),
+  options: NewGameOptions = {},
+): GameState {
   const rng = createRng(seed);
   const { clues, solution } = generatePuzzle(rng, settings.difficulty);
   return {
     seed,
     settings,
+    mode: options.mode ?? 'free',
+    dailyKey: options.dailyKey ?? null,
+    elapsed: 0,
     solution,
     given: clues.map((v) => v !== 0),
     values: clues.slice(),
@@ -366,6 +389,12 @@ export function reduce(state: GameState, action: Action): GameState {
 
     case 'toggleNotesMode':
       return { ...state, notesMode: !state.notesMode };
+
+    case 'tick':
+      return state.status === 'playing' ? { ...state, elapsed: state.elapsed + 1 } : state;
+
+    case 'load':
+      return action.state;
 
     case 'updateSettings':
       return { ...state, settings: { ...state.settings, ...action.settings } };
