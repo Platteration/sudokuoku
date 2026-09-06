@@ -29,11 +29,11 @@ import {
   reduce,
   remainingCounts,
 } from '../engine';
-import { loadGame, saveGame } from '../storage';
+import { hasSeenHelp, loadGame, markHelpSeen, saveGame } from '../storage';
 import { colors, radius } from '../theme';
 import { formatTime } from '../utils/time';
 
-type Loaded = { state: GameState; elapsed: number };
+type Loaded = { state: GameState; elapsed: number; firstLaunch: boolean };
 
 function haptic(kind: 'shift' | 'win' | 'tap') {
   if (Platform.OS === 'web') return;
@@ -51,13 +51,14 @@ export default function GameScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    loadGame().then((saved) => {
+    Promise.all([loadGame(), hasSeenHelp()]).then(([saved, seenHelp]) => {
       if (cancelled) return;
+      const firstLaunch = !seenHelp;
       if (saved && saved.state.status === 'playing') {
-        setLoaded({ state: saved.state, elapsed: saved.elapsed });
+        setLoaded({ state: saved.state, elapsed: saved.elapsed, firstLaunch });
       } else {
         const settings = saved ? saved.state.settings : DEFAULT_SETTINGS;
-        setLoaded({ state: newGame({ ...DEFAULT_SETTINGS, ...settings }), elapsed: 0 });
+        setLoaded({ state: newGame({ ...DEFAULT_SETTINGS, ...settings }), elapsed: 0, firstLaunch });
       }
     });
     return () => {
@@ -80,12 +81,19 @@ function Game({ initial }: { initial: Loaded }) {
   const [state, dispatch] = useReducer(reduce, initial.state);
   const [elapsed, setElapsed] = useState(initial.elapsed);
   const [showSettings, setShowSettings] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(initial.firstLaunch);
   const [showWin, setShowWin] = useState(false);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
-  const boardSize = Math.floor(Math.min(width - 24, height * 0.5));
+  // The board fills whatever space is left between the banner and the pad.
+  const [boardArea, setBoardArea] = useState({ w: width - 24, h: height * 0.5 });
+  const boardSize = Math.max(200, Math.floor(Math.min(boardArea.w, boardArea.h) - 4));
+
+  const closeHelp = () => {
+    setShowHelp(false);
+    markHelpSeen();
+  };
 
   // Timer: ticks while playing and the app is in the foreground.
   const appActive = useRef(true);
@@ -194,7 +202,13 @@ function Game({ initial }: { initial: Loaded }) {
         </View>
       ) : null}
 
-      <View style={styles.boardWrap}>
+      <View
+        style={styles.boardWrap}
+        onLayout={(e) => {
+          const { width: w, height: h } = e.nativeEvent.layout;
+          setBoardArea((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+        }}
+      >
         <Board
           state={state}
           size={boardSize}
@@ -231,7 +245,7 @@ function Game({ initial }: { initial: Loaded }) {
         onChange={(patch) => send({ type: 'updateSettings', settings: patch })}
         onNewGame={(difficulty) => startNewGame(difficulty)}
       />
-      <HelpSheet visible={showHelp} onClose={() => setShowHelp(false)} />
+      <HelpSheet visible={showHelp} onClose={closeHelp} />
       <WinSheet
         visible={showWin}
         state={state}

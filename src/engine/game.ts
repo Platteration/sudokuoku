@@ -79,6 +79,12 @@ export interface Phantom {
   fadeMs: number;
   createdAtMove: number;
   unlockAtMove: number;
+  /**
+   * Set once the lock has run out. The record then lingers, invisible, until
+   * the cell is filled again so the game can tell whether the digit was
+   * recalled correctly.
+   */
+  unlocked?: boolean;
 }
 
 export interface ShiftEvent extends Shift {
@@ -100,6 +106,10 @@ interface Snapshot {
   phantoms: (Phantom | null)[];
   lastPhantom: Phantom | null;
   phantomCount: number;
+  /** Phantom cells refilled with the digit that had faded. */
+  phantomsRecalled: number;
+  /** Phantom cells refilled with a different digit. */
+  phantomsMissed: number;
 }
 
 export interface GameState extends Snapshot {
@@ -143,6 +153,8 @@ export function newGame(settings: Settings, seed: number = randomSeed()): GameSt
     phantoms: new Array<Phantom | null>(CELLS).fill(null),
     lastPhantom: null,
     phantomCount: 0,
+    phantomsRecalled: 0,
+    phantomsMissed: 0,
     notesMode: false,
     status: 'playing',
     history: [],
@@ -165,6 +177,8 @@ function snapshot(s: GameState): Snapshot {
     phantoms: s.phantoms,
     lastPhantom: s.lastPhantom,
     phantomCount: s.phantomCount,
+    phantomsRecalled: s.phantomsRecalled,
+    phantomsMissed: s.phantomsMissed,
   };
 }
 
@@ -181,7 +195,32 @@ function phantomRng(state: GameState) {
 /** True while nothing may be entered in the cell. */
 export function isLocked(state: GameState, pos: number): boolean {
   const ph = state.phantoms[pos];
-  return ph !== null && state.moves < ph.unlockAtMove;
+  return ph !== null && !ph.unlocked && state.moves < ph.unlockAtMove;
+}
+
+/** Locked phantoms only; unlocked records awaiting recall do not count. */
+function lockedPhantomCount(state: GameState): number {
+  let n = 0;
+  for (let p = 0; p < CELLS; p++) if (isLocked(state, p)) n++;
+  return n;
+}
+
+/**
+ * Called when the player fills `pos`: if a faded digit was waiting to be
+ * recalled there, score the attempt and retire the record.
+ */
+function scoreRecall(state: GameState, pos: number, digit: number): GameState {
+  const ph = state.phantoms[pos];
+  if (ph === null) return state;
+  const phantoms = state.phantoms.slice();
+  phantoms[pos] = null;
+  const recalled = digit === ph.value;
+  return {
+    ...state,
+    phantoms,
+    phantomsRecalled: state.phantomsRecalled + (recalled ? 1 : 0),
+    phantomsMissed: state.phantomsMissed + (recalled ? 0 : 1),
+  };
 }
 
 /** Empty cells the player is currently allowed to fill. */
@@ -198,18 +237,20 @@ function playableEmptyCells(state: GameState): number {
  */
 function ensurePlayable(state: GameState): GameState {
   if (playableEmptyCells(state) > 0) return state;
-  if (!state.phantoms.some((ph) => ph !== null)) return state;
-  return { ...state, phantoms: state.phantoms.map(() => null) };
-}
-
-/** Drops phantoms whose lock has run out. */
-function expirePhantoms(state: GameState): GameState {
-  if (!state.phantoms.some((ph) => ph !== null && state.moves >= ph.unlockAtMove)) return state;
+  if (lockedPhantomCount(state) === 0) return state;
   return {
     ...state,
-    phantoms: state.phantoms.map((ph) =>
-      ph !== null && state.moves >= ph.unlockAtMove ? null : ph,
-    ),
+    phantoms: state.phantoms.map((ph) => (ph === null ? null : { ...ph, unlocked: true })),
+  };
+}
+
+/** Marks phantoms whose lock has run out as unlocked. */
+function expirePhantoms(state: GameState): GameState {
+  const due = (ph: Phantom | null) => ph !== null && !ph.unlocked && state.moves >= ph.unlockAtMove;
+  if (!state.phantoms.some(due)) return state;
+  return {
+    ...state,
+    phantoms: state.phantoms.map((ph) => (due(ph) ? { ...ph!, unlocked: true } : ph)),
   };
 }
 
@@ -222,8 +263,7 @@ function spawnPhantom(state: GameState, exclude: number | null, now: number): Ga
   const { phantomTarget, phantomLockMoves, phantomFadeMs, phantomMax } = state.settings;
   // Never take away the player's last playable cell.
   if (playableEmptyCells(state) === 0) return state;
-  const active = state.phantoms.filter((ph) => ph !== null).length;
-  if (active >= Math.max(1, phantomMax)) return state;
+  if (lockedPhantomCount(state) >= Math.max(1, phantomMax)) return state;
   const eligible: number[] = [];
   for (let p = 0; p < CELLS; p++) {
     if (p === exclude || state.values[p] === 0 || state.phantoms[p] !== null) continue;
@@ -358,7 +398,12 @@ export function reduce(state: GameState, action: Action): GameState {
       values[p] = d;
       const notes = state.notes.slice();
       notes[p] = 0;
-      return afterMove(state, { ...state, values, notes }, p, action.now ?? Date.now());
+      return afterMove(
+        state,
+        scoreRecall({ ...state, values, notes }, p, d),
+        p,
+        action.now ?? Date.now(),
+      );
     }
 
     case 'erase': {
@@ -386,7 +431,7 @@ export function reduce(state: GameState, action: Action): GameState {
       notes[p] = 0;
       return afterMove(
         state,
-        { ...state, values, notes, hintsUsed: state.hintsUsed + 1 },
+        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1 }, p, values[p]),
         p,
         action.now ?? Date.now(),
       );

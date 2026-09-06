@@ -36,7 +36,31 @@ function fadeProgress(ph: Phantom, now: number): number {
  */
 export default function Board({ state, size, onSelect }: Props) {
   const cell = size / 9;
-  const { tokens, values, given, notes, selected, settings, phantoms, moves } = state;
+  const { tokens, values, given, notes, selected, settings, phantoms, moves, lastShift } = state;
+
+  // Cells that just received a moved digit flash briefly after each shift.
+  const flash = useRef(new Animated.Value(0)).current;
+  const lastFlashed = useRef(state.shiftCount);
+  const movedTo = useMemo(() => {
+    const set = new Set<number>();
+    if (!lastShift) return set;
+    lastShift.dest.forEach((to, from) => {
+      if (to !== from) set.add(to);
+    });
+    return set;
+  }, [lastShift]);
+  useEffect(() => {
+    if (state.shiftCount === lastFlashed.current) return;
+    lastFlashed.current = state.shiftCount;
+    flash.setValue(0.9);
+    Animated.timing(flash, {
+      toValue: 0,
+      duration: SHIFT_MS + 500,
+      delay: settings.animateShifts ? SHIFT_MS : 0,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [state.shiftCount, settings.animateShifts, flash]);
 
   // One fade-out animation per phantom, keyed by the phantom's id so it
   // keeps running while the cell travels across the board during shifts.
@@ -162,6 +186,23 @@ export default function Board({ state, size, onSelect }: Props) {
           ]}
         />
       ))}
+      {/* Post-shift flash on the cells that received a moved digit. */}
+      {[...movedTo].map((pos) => (
+        <Animated.View
+          key={`f${pos}`}
+          pointerEvents="none"
+          style={[
+            styles.flash,
+            {
+              left: colOf(pos) * cell,
+              top: rowOf(pos) * cell,
+              width: cell,
+              height: cell,
+              opacity: flash,
+            },
+          ]}
+        />
+      ))}
       {/* Thick box lines. */}
       {lines.map((offset) => (
         <View
@@ -275,6 +316,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line,
+  },
+  flash: {
+    position: 'absolute',
+    backgroundColor: colors.primarySoft,
   },
   thickLine: {
     position: 'absolute',

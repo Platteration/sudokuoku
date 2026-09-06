@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CELLS, DEFAULT_SETTINGS, GameState, Settings } from './engine';
 
 const GAME_KEY = 'sudokuoku:game:v1';
+const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
 
 export interface SavedGame {
   state: GameState;
@@ -33,6 +34,8 @@ function normalize(state: GameState): GameState {
         : new Array(CELLS).fill(null),
     lastPhantom: state.lastPhantom ?? null,
     phantomCount: typeof state.phantomCount === 'number' ? state.phantomCount : 0,
+    phantomsRecalled: typeof state.phantomsRecalled === 'number' ? state.phantomsRecalled : 0,
+    phantomsMissed: typeof state.phantomsMissed === 'number' ? state.phantomsMissed : 0,
     history: Array.isArray(state.history) ? state.history : [],
   };
 }
@@ -57,6 +60,22 @@ export async function saveGame(saved: SavedGame): Promise<void> {
     await AsyncStorage.setItem(GAME_KEY, JSON.stringify(saved));
   } catch {
     // Persisting is best-effort; the game keeps working without it.
+  }
+}
+
+export async function hasSeenHelp(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(HELP_SEEN_KEY)) === '1';
+  } catch {
+    return true; // if storage is unavailable, do not nag on every launch
+  }
+}
+
+export async function markHelpSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(HELP_SEEN_KEY, '1');
+  } catch {
+    // best-effort
   }
 }
 

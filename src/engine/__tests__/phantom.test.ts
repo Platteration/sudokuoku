@@ -31,7 +31,7 @@ function playCorrect(state: GameState, now = 1000): GameState {
 }
 
 function phantomPositions(state: GameState): number[] {
-  return state.phantoms.map((ph, i) => (ph ? i : -1)).filter((i) => i >= 0);
+  return state.phantoms.map((ph, i) => (ph && !ph.unlocked ? i : -1)).filter((i) => i >= 0);
 }
 
 describe('phantom creation', () => {
@@ -121,10 +121,35 @@ describe('locked cells', () => {
     s = playCorrect(s); // move 5: unlock
     const where = s.tokens.indexOf(token);
     expect(isLocked(s, where)).toBe(false);
-    expect(s.phantoms[where]).toBeNull();
+    expect(s.phantoms[where]!.unlocked).toBe(true);
     const refilled = run(s, { type: 'select', pos: where }, { type: 'input', digit: s.solution[where] });
     expect(refilled.values[where]).toBe(s.solution[where]);
     expect(refilled.moves).toBe(6);
+    expect(refilled.phantoms[where]).toBeNull();
+  });
+
+  it('scores a recall when the faded digit is put back, and a miss otherwise', () => {
+    let { s, pos } = withPhantom();
+    const token = s.tokens[pos];
+    const faded = s.phantoms[pos]!.value;
+    for (let i = 0; i < 3; i++) s = playCorrect(s);
+    const where = s.tokens.indexOf(token);
+    expect(isLocked(s, where)).toBe(false);
+    const hit = run(s, { type: 'select', pos: where }, { type: 'input', digit: faded });
+    expect(hit.phantomsRecalled).toBe(1);
+    expect(hit.phantomsMissed).toBe(0);
+    const wrong = faded === 9 ? 1 : faded + 1;
+    const miss = run(s, { type: 'select', pos: where }, { type: 'input', digit: wrong });
+    expect(miss.phantomsRecalled).toBe(0);
+    expect(miss.phantomsMissed).toBe(1);
+    expect(miss.phantoms[where]).toBeNull();
+  });
+
+  it('an unlocked phantom awaiting recall does not count towards the cap', () => {
+    let s = newGame({ ...PHANTOM, phantomEvery: 1, phantomLockMoves: 1, phantomMax: 1 }, 29);
+    for (let i = 0; i < 8; i++) s = playCorrect(s);
+    expect(s.phantomCount).toBeGreaterThan(1);
+    expect(phantomPositions(s).length).toBeLessThanOrEqual(1);
   });
 
   it('a faded given can be refilled correctly and the game can still be won', () => {
@@ -134,6 +159,8 @@ describe('locked cells', () => {
     expect(s.status).toBe('won');
     expect(s.values).toEqual(s.solution);
     expect(s.phantomCount).toBeGreaterThan(0);
+    expect(s.phantomsRecalled).toBe(s.phantomCount);
+    expect(s.phantomsMissed).toBe(0);
   });
 });
 
