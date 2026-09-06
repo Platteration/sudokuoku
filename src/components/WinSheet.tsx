@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GameState } from '../engine';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles } from '../theme';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
 import { formatTime } from '../utils/time';
@@ -15,6 +15,7 @@ interface Props {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
@@ -24,6 +25,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export default function WinSheet({ visible, state, elapsed, onClose, onNewGame }: Props) {
+  const styles = useStyles(makeStyles);
   return (
     <Sheet
       visible={visible}
@@ -58,7 +60,8 @@ export default function WinSheet({ visible, state, elapsed, onClose, onNewGame }
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   lead: {
     fontSize: 16,
     color: colors.text,
@@ -95,4 +98,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
   },
-});
+  });

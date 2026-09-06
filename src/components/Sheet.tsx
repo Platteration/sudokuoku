@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles } from '../theme';
 
 interface Props {
   visible: boolean;
@@ -12,6 +12,7 @@ interface Props {
 
 /** Bottom sheet style modal used by settings, help and the win screen. */
 export default function Sheet({ visible, title, onClose, children, footer }: Props) {
+  const styles = useStyles(makeStyles);
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -33,10 +34,11 @@ export default function Sheet({ visible, title, onClose, children, footer }: Pro
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.backdrop,
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -75,4 +77,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
   },
-});
+  });

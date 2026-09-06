@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles } from '../theme';
 
 interface Props {
   notesMode: boolean;
@@ -21,6 +21,7 @@ interface ButtonProps {
 }
 
 function ControlButton({ label, icon, active, disabled, onPress }: ButtonProps) {
+  const styles = useStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -42,6 +43,7 @@ function ControlButton({ label, icon, active, disabled, onPress }: ButtonProps) 
 }
 
 export default function Controls(p: Props) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.row}>
       <ControlButton label="Undo" icon="↶" disabled={!p.canUndo || p.disabled} onPress={p.onUndo} />
@@ -58,7 +60,8 @@ export default function Controls(p: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -100,4 +103,4 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '600',
   },
-});
+  });

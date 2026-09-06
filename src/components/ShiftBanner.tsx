@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { ShiftEvent, ShiftKind } from '../engine';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles } from '../theme';
 
 interface Props {
   shift: ShiftEvent | null;
@@ -22,6 +22,7 @@ const ICONS: Record<ShiftKind, string> = {
 
 /** Announces the most recent shift and pops each time a new one lands. */
 export default function ShiftBanner({ shift, shiftCount, moves }: Props) {
+  const styles = useStyles(makeStyles);
   const scale = useRef(new Animated.Value(1)).current;
   const lastCount = useRef(shiftCount);
 
@@ -60,7 +61,8 @@ export default function ShiftBanner({ shift, shiftCount, moves }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -80,7 +82,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   icon: {
-    color: '#fff',
+    color: colors.onPrimary,
     fontSize: 22,
     fontWeight: '700',
   },
@@ -88,13 +90,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    color: '#fff',
+    color: colors.onBanner,
     fontSize: 15,
     fontWeight: '600',
   },
   subtitle: {
-    color: '#c7cad3',
+    color: colors.onBannerMuted,
     fontSize: 12,
     marginTop: 2,
   },
-});
+  });

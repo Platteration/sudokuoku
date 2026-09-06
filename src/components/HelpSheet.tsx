@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text } from 'react-native';
-import { colors } from '../theme';
+import { Colors, useStyles } from '../theme';
 import Sheet from './Sheet';
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
 }
 
 export default function HelpSheet({ visible, onClose }: Props) {
+  const styles = useStyles(makeStyles);
   return (
     <Sheet visible={visible} title="How Sudokuoku works" onClose={onClose}>
       <Text style={styles.p}>
@@ -55,7 +56,8 @@ export default function HelpSheet({ visible, onClose }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   h: {
     fontSize: 16,
     fontWeight: '700',
@@ -69,4 +71,4 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 6,
   },
-});
+  });

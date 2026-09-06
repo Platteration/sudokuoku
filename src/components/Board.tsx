@@ -11,7 +11,7 @@ import {
   mistakes,
   rowOf,
 } from '../engine';
-import { colors } from '../theme';
+import { Colors, useStyles, useTheme } from '../theme';
 
 interface Props {
   state: GameState;
@@ -35,6 +35,8 @@ function fadeProgress(ph: Phantom, now: number): number {
  * spot to its new one.
  */
 export default function Board({ state, size, onSelect }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles(makeStyles);
   const cell = size / 9;
   const { tokens, values, given, notes, selected, settings, phantoms, moves, lastShift } = state;
 
@@ -305,7 +307,8 @@ export default function Board({ state, size, onSelect }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   board: {
     borderWidth: 2,
     borderColor: colors.lineStrong,
@@ -361,4 +364,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: colors.textMuted,
   },
-});
+  });

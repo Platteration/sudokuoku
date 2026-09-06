@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles } from '../theme';
 
 interface Props {
   remaining: number[];
@@ -10,6 +10,7 @@ interface Props {
 }
 
 export default function NumberPad({ remaining, notesMode, disabled, onDigit }: Props) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.row}>
       {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => {
@@ -37,7 +38,8 @@ export default function NumberPad({ remaining, notesMode, disabled, onDigit }: P
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -77,4 +79,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     height: 14,
   },
-});
+  });

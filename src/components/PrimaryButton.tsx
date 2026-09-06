@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles } from '../theme';
 
 interface Props {
   label: string;
@@ -10,6 +10,7 @@ interface Props {
 
 export default function PrimaryButton({ label, onPress, variant = 'primary' }: Props) {
   const secondary = variant === 'secondary';
+  const styles = useStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -25,7 +26,8 @@ export default function PrimaryButton({ label, onPress, variant = 'primary' }: P
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   button: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
@@ -39,11 +41,11 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   label: {
-    color: '#fff',
+    color: colors.onPrimary,
     fontSize: 16,
     fontWeight: '700',
   },
   secondaryLabel: {
     color: colors.text,
   },
-});
+  });

@@ -7,8 +7,9 @@ import {
   SHIFT_KIND_LABEL,
   Settings,
   ShiftKind,
+  ThemePreference,
 } from '../engine';
-import { colors, radius } from '../theme';
+import { Colors, radius, useStyles, useTheme } from '../theme';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
 
@@ -27,6 +28,7 @@ const PHANTOM_LOCK = [3, 5, 8, 12];
 const PHANTOM_MAX = [1, 2, 3, 5];
 const PHANTOM_FADE_MS = [2000, 4000, 8000];
 const PHANTOM_TARGETS: PhantomTarget[] = ['entries', 'givens', 'both'];
+const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
 const TARGET_LABEL: Record<PhantomTarget, string> = {
   entries: 'My entries',
   givens: 'Givens',
@@ -44,6 +46,7 @@ function Segmented<T extends string | number>({
   onChange: (v: T) => void;
   label: (v: T) => string;
 }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.segmented}>
       {options.map((o) => {
@@ -65,6 +68,8 @@ function Segmented<T extends string | number>({
 }
 
 function Row({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+  const styles = useStyles(makeStyles);
+  const { colors } = useTheme();
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
@@ -77,6 +82,7 @@ function Row({ label, hint, value, onChange }: { label: string; hint?: string; v
 }
 
 export default function SettingsSheet({ visible, settings, onClose, onChange, onNewGame }: Props) {
+  const styles = useStyles(makeStyles);
   const [difficulty, setDifficulty] = useState<Difficulty>(settings.difficulty);
 
   const toggleKind = (kind: ShiftKind, on: boolean) => {
@@ -186,6 +192,14 @@ export default function SettingsSheet({ visible, settings, onClose, onChange, on
         </>
       ) : null}
 
+      <Text style={styles.section}>Appearance</Text>
+      <Segmented
+        options={THEMES}
+        value={settings.theme}
+        onChange={(t) => onChange({ theme: t })}
+        label={(t) => t[0].toUpperCase() + t.slice(1)}
+      />
+
       <Text style={styles.section}>Assistance</Text>
       <Row
         label="Highlight conflicts"
@@ -208,7 +222,8 @@ export default function SettingsSheet({ visible, settings, onClose, onChange, on
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   section: {
     fontSize: 13,
     fontWeight: '700',
@@ -250,7 +265,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   segmentLabelActive: {
-    color: '#fff',
+    color: colors.onPrimary,
     fontWeight: '700',
   },
   row: {
@@ -273,4 +288,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
-});
+  });

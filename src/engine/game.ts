@@ -18,6 +18,7 @@ import {
 } from './transforms';
 
 export type PhantomTarget = 'entries' | 'givens' | 'both';
+export type ThemePreference = 'system' | 'light' | 'dark';
 
 export interface Settings {
   difficulty: Difficulty;
@@ -31,6 +32,8 @@ export interface Settings {
   showMistakes: boolean;
   /** Animate cells sliding to their new spots. */
   animateShifts: boolean;
+  /** Light or dark appearance, or follow the system. */
+  theme: ThemePreference;
   /** Phantom challenge: filled cells fade away and lock for a while. */
   phantomMode: boolean;
   /** Which filled cells may fade. */
@@ -54,6 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   highlightConflicts: true,
   showMistakes: false,
   animateShifts: true,
+  theme: 'system',
   phantomMode: false,
   phantomTarget: 'both',
   phantomEvery: 3,

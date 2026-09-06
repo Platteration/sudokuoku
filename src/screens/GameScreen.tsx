@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -30,7 +31,7 @@ import {
   remainingCounts,
 } from '../engine';
 import { hasSeenHelp, loadGame, markHelpSeen, saveGame } from '../storage';
-import { colors, radius } from '../theme';
+import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
 import { formatTime } from '../utils/time';
 
 type Loaded = { state: GameState; elapsed: number; firstLaunch: boolean };
@@ -68,17 +69,46 @@ export default function GameScreen() {
 
   if (!loaded) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Shuffling the digits…</Text>
-      </View>
+      <ThemeProvider preference="system">
+        <Loading />
+      </ThemeProvider>
     );
   }
   return <Game initial={loaded} />;
 }
 
+function Loading() {
+  const styles = useStyles(makeStyles);
+  const { colors, dark } = useTheme();
+  return (
+    <View style={styles.loading}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={styles.loadingText}>Shuffling the digits…</Text>
+      <StatusBar style={dark ? 'light' : 'dark'} />
+    </View>
+  );
+}
+
 function Game({ initial }: { initial: Loaded }) {
   const [state, dispatch] = useReducer(reduce, initial.state);
+  return (
+    <ThemeProvider preference={state.settings.theme}>
+      <GameView state={state} dispatch={dispatch} initial={initial} />
+    </ThemeProvider>
+  );
+}
+
+function GameView({
+  state,
+  dispatch,
+  initial,
+}: {
+  state: GameState;
+  dispatch: React.Dispatch<Action>;
+  initial: Loaded;
+}) {
+  const styles = useStyles(makeStyles);
+  const { colors, dark } = useTheme();
   const [elapsed, setElapsed] = useState(initial.elapsed);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(initial.firstLaunch);
@@ -167,6 +197,7 @@ function Game({ initial }: { initial: Loaded }) {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
+      <StatusBar style={dark ? 'light' : 'dark'} />
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Sudokuoku</Text>
@@ -258,6 +289,8 @@ function Game({ initial }: { initial: Loaded }) {
 }
 
 function HeaderButton({ label, a11y, onPress }: { label: string; a11y: string; onPress: () => void }) {
+  const styles = useStyles(makeStyles);
+  const { colors } = useTheme();
   return (
     <Pressable
       onPress={onPress}
@@ -272,6 +305,7 @@ function HeaderButton({ label, a11y, onPress }: { label: string; a11y: string; o
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
@@ -280,7 +314,8 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) =>
+  StyleSheet.create({
   loading: {
     flex: 1,
     backgroundColor: colors.background,
@@ -375,4 +410,4 @@ const styles = StyleSheet.create({
   bottom: {
     width: '100%',
   },
-});
+  });
