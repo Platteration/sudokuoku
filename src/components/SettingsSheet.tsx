@@ -8,6 +8,7 @@ import {
   SHIFT_KIND_LABEL,
   Settings,
   ShiftKind,
+  ShiftPreview,
   ThemePreference,
   matchingPreset,
 } from '../engine';
@@ -35,6 +36,12 @@ const PHANTOM_MAX = [1, 2, 3, 5];
 const PHANTOM_FADE_MS = [2000, 4000, 8000];
 const PHANTOM_TARGETS: PhantomTarget[] = ['entries', 'givens', 'both'];
 const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
+const PREVIEWS: ShiftPreview[] = ['off', 'category', 'exact'];
+const PREVIEW_LABEL: Record<ShiftPreview, string> = {
+  off: 'Off',
+  category: 'Category',
+  exact: 'Exact',
+};
 const TARGET_LABEL: Record<PhantomTarget, string> = {
   entries: 'My entries',
   givens: 'Givens',
@@ -299,6 +306,16 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
       />
 
       <Text style={styles.section}>Assistance</Text>
+      <Text style={styles.subsection}>Warn me what is coming</Text>
+      <Segmented
+        options={PREVIEWS}
+        value={settings.shiftPreview}
+        onChange={(v) => onChange({ shiftPreview: v })}
+        label={(v) => PREVIEW_LABEL[v]}
+      />
+      <Text style={styles.sectionHint}>
+        Category names the family of the coming shift, exact spells it out. Off keeps the surprise.
+      </Text>
       <Row
         label="Highlight conflicts"
         hint="Mark digits that clash in a row, column or box."

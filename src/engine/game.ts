@@ -19,6 +19,7 @@ import {
 
 export type PhantomTarget = 'entries' | 'givens' | 'both';
 export type ThemePreference = 'system' | 'light' | 'dark';
+export type ShiftPreview = 'off' | 'category' | 'exact';
 
 export interface Settings {
   difficulty: Difficulty;
@@ -28,6 +29,8 @@ export interface Settings {
   shiftEvery: number;
   /** How many shifts fire back to back when one is triggered. */
   shiftsPerMove: number;
+  /** How much of the coming shift to reveal before the player moves. */
+  shiftPreview: ShiftPreview;
   /** Highlight digits that clash with a peer. */
   highlightConflicts: boolean;
   /** Highlight entries that differ from the solution. */
@@ -61,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   enabledShifts: ALL_SHIFT_KINDS.filter((k) => k !== 'relabel'),
   shiftEvery: 1,
   shiftsPerMove: 1,
+  shiftPreview: 'off',
   highlightConflicts: true,
   showMistakes: false,
   animateShifts: true,
@@ -484,6 +488,22 @@ export function reduce(state: GameState, action: Action): GameState {
       );
     }
   }
+}
+
+/**
+ * The shift that will fire after the next move, or null when the next move
+ * does not trigger one. This reads the very same seeded stream `afterMove`
+ * will use, so the preview is exact rather than a guess. A move that
+ * completes the puzzle ends the game before any shift, which no preview can
+ * know in advance.
+ */
+export function nextShift(state: GameState): Shift | null {
+  if (state.status !== 'playing') return null;
+  const moves = state.moves + 1;
+  const every = Math.max(1, state.settings.shiftEvery);
+  if (moves % every !== 0) return null;
+  const rng = createRng((state.seed ^ (moves * 0x9e3779b1)) >>> 0);
+  return randomShift(rng, state.settings.enabledShifts);
 }
 
 /** Positions that are filled but differ from the solution. */

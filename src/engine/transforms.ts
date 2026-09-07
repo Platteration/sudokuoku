@@ -54,6 +54,39 @@ export const SHIFT_KIND_LABEL: Record<ShiftKind, string> = {
   relabel: 'Digits shift (1→2→3…)',
 };
 
+/**
+ * A coarse family per shift kind. The preview can name the family without
+ * giving away the exact move, which keeps some of the surprise.
+ */
+export type ShiftCategory = 'rows' | 'columns' | 'board' | 'boxes' | 'digits';
+
+export const SHIFT_CATEGORY: Record<ShiftKind, ShiftCategory> = {
+  'band-rows': 'rows',
+  bands: 'rows',
+  'stack-cols': 'columns',
+  stacks: 'columns',
+  rotate: 'board',
+  mirror: 'board',
+  'box-slide': 'boxes',
+  relabel: 'digits',
+};
+
+export const CATEGORY_LABEL: Record<ShiftCategory, string> = {
+  rows: 'Rows will move',
+  columns: 'Columns will move',
+  board: 'The whole board will turn',
+  boxes: 'The boxes will shuffle',
+  digits: 'The digits will change',
+};
+
+export const CATEGORY_ICON: Record<ShiftCategory, string> = {
+  rows: '⇅',
+  columns: '⇄',
+  board: '↻',
+  boxes: '▦',
+  digits: '#',
+};
+
 export interface Shift {
   kind: ShiftKind;
   /** Human readable description, e.g. "Rows 4–6 slid down 1". */

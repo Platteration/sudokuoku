@@ -6,6 +6,7 @@ import {
   applyShift,
   mistakes,
   newGame,
+  nextShift,
   reduce,
   remainingCounts,
 } from '../game';
@@ -180,5 +181,46 @@ describe('hint and win', () => {
     const counts = remainingCounts(s0);
     const total = counts.reduce((a, b) => a + b, 0);
     expect(total).toBe(s0.values.filter((v) => v === 0).length);
+  });
+});
+
+describe('shift preview', () => {
+  it('predicts exactly the shift the next move will apply', () => {
+    let s = newGame(DEFAULT_SETTINGS, 31);
+    for (let i = 0; i < 12; i++) {
+      const predicted = nextShift(s);
+      const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
+      const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+      expect(after.lastShift!.kind).toBe(predicted!.kind);
+      expect(after.lastShift!.description).toBe(predicted!.description);
+      expect(after.lastShift!.dest).toEqual(predicted!.dest);
+      s = after;
+    }
+  });
+
+  it('is null when the next move does not trigger a shift', () => {
+    const s = newGame({ ...DEFAULT_SETTINGS, shiftEvery: 3 }, 32);
+    expect(nextShift(s)).toBeNull(); // move 1 of 3
+    const p = s.values.findIndex((v) => v === 0);
+    const s1 = run(s, { type: 'select', pos: p }, { type: 'input', digit: 1 });
+    expect(nextShift(s1)).toBeNull(); // move 2 of 3
+    const q = s1.values.findIndex((v) => v === 0);
+    const s2 = run(s1, { type: 'select', pos: q }, { type: 'input', digit: 1 });
+    expect(nextShift(s2)).not.toBeNull(); // move 3 triggers
+    expect(s2.shiftCount).toBe(0);
+  });
+
+  it('is null with no shifts enabled or once the game is over', () => {
+    expect(nextShift(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 33))).toBeNull();
+    const won = { ...newGame(DEFAULT_SETTINGS, 33), status: 'won' as const };
+    expect(nextShift(won)).toBeNull();
+  });
+
+  it('does not change when the player only takes notes', () => {
+    const s = newGame(DEFAULT_SETTINGS, 34);
+    const before = nextShift(s);
+    const p = s.values.findIndex((v) => v === 0);
+    const noted = run(s, { type: 'select', pos: p }, { type: 'toggleNotesMode' }, { type: 'input', digit: 5 });
+    expect(nextShift(noted)!.description).toBe(before!.description);
   });
 });

@@ -39,6 +39,7 @@ import {
   emptyProfile,
   isLocked,
   newGame,
+  nextShift,
   recordGameStart,
   recordGameWin,
   reduce,
@@ -74,6 +75,7 @@ const SHARED_SETTING_KEYS: (keyof Settings)[] = [
   'animateShifts',
   'theme',
   'themePack',
+  'shiftPreview',
   'reduceMotion',
   'phantomMarkers',
   'phantomFadeMs',
@@ -385,6 +387,8 @@ function GameView({
         shiftCount={state.shiftCount}
         moves={state.moves}
         reduceMotion={state.settings.reduceMotion}
+        next={state.settings.shiftPreview === 'off' ? null : nextShift(state)}
+        preview={state.settings.shiftPreview}
       />
 
       {state.settings.phantomMode ? (
