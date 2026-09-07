@@ -42,6 +42,7 @@ import {
   nextShift,
   recordGameStart,
   recordGameWin,
+  refreshStreak,
   reduce,
   remainingCounts,
   shareText,
@@ -106,7 +107,9 @@ export default function GameScreen() {
     Promise.all([loadGame(), loadDailyGame(), loadProfile(), hasSeenHelp()]).then(
       ([savedFree, savedDaily, loadedProfile, seenHelp]) => {
         if (cancelled) return;
-        let profile = loadedProfile;
+        // Grant the monthly freeze and spend one if a missed day can be saved.
+        let profile = refreshStreak(loadedProfile, dateKey(new Date()));
+        if (profile !== loadedProfile) saveProfile(profile);
         let free: GameState;
         if (savedFree && savedFree.status === 'playing') {
           free = savedFree;
@@ -340,7 +343,7 @@ function GameView({
   const shareDaily = async () => {
     const result = profile.daily[todayKey];
     if (!result) return;
-    await shareMessage(shareText(result, currentStreak(profile.daily, todayKey)));
+    await shareMessage(shareText(result, currentStreak(profile.daily, todayKey, profile.frozenDays)));
   };
 
   const closeHelp = () => {

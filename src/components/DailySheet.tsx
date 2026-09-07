@@ -41,7 +41,7 @@ function untilMidnight(): string {
 export default function DailySheet(p: Props) {
   const styles = useStyles(makeStyles);
   const result = p.profile.daily[p.todayKey];
-  const streak = currentStreak(p.profile.daily, p.todayKey);
+  const streak = currentStreak(p.profile.daily, p.todayKey, p.profile.frozenDays);
   const week = Array.from({ length: 7 }, (_, i) => shiftDateKey(p.todayKey, i - 6));
 
   return (
@@ -97,8 +97,8 @@ export default function DailySheet(p: Props) {
           <Text style={styles.streakLabel}>best streak</Text>
         </View>
         <View style={styles.streakCard}>
-          <Text style={styles.streakValue}>{p.profile.totals.dailiesCompleted}</Text>
-          <Text style={styles.streakLabel}>completed</Text>
+          <Text style={styles.streakValue}>❄️ {p.profile.freezes}</Text>
+          <Text style={styles.streakLabel}>{p.profile.freezes === 1 ? 'freeze' : 'freezes'}</Text>
         </View>
       </View>
 
@@ -106,11 +106,21 @@ export default function DailySheet(p: Props) {
       <View style={styles.week}>
         {week.map((key) => {
           const done = !!p.profile.daily[key];
+          const frozen = !done && !!p.profile.frozenDays[key];
           const isToday = key === p.todayKey;
           return (
             <View key={key} style={styles.day}>
-              <View style={[styles.dot, done && styles.dotDone, isToday && !done && styles.dotToday]}>
-                <Text style={[styles.dotText, done && styles.dotTextDone]}>{done ? '✓' : ''}</Text>
+              <View
+                style={[
+                  styles.dot,
+                  done && styles.dotDone,
+                  frozen && styles.dotFrozen,
+                  isToday && !done && styles.dotToday,
+                ]}
+              >
+                <Text style={[styles.dotText, done && styles.dotTextDone]}>
+                  {done ? '✓' : frozen ? '❄' : ''}
+                </Text>
               </View>
               <Text style={[styles.dayLetter, isToday && styles.dayLetterToday]}>
                 {DAY_LETTERS[parseDateKey(key).getDay()]}
@@ -119,7 +129,10 @@ export default function DailySheet(p: Props) {
           );
         })}
       </View>
-      <Text style={styles.next}>Next daily in {untilMidnight()}. Miss a day and the streak resets.</Text>
+      <Text style={styles.next}>
+        Next daily in {untilMidnight()}. Miss a day and a freeze covers it, if you have one. You
+        get one freeze a month, up to three.
+      </Text>
     </Sheet>
   );
 }
@@ -237,6 +250,10 @@ const makeStyles = (colors: Colors) =>
     dotDone: {
       backgroundColor: colors.success,
       borderColor: colors.success,
+    },
+    dotFrozen: {
+      backgroundColor: colors.primarySoft,
+      borderColor: colors.primary,
     },
     dotToday: {
       borderColor: colors.primary,

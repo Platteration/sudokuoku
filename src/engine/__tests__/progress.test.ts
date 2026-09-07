@@ -3,7 +3,11 @@ import { DEFAULT_SETTINGS, GameState, newGame, reduce } from '../game';
 import {
   BADGES,
   DailyResult,
+  MAX_FREEZES,
+  applyStreakFreeze,
   currentStreak,
+  grantMonthlyFreeze,
+  refreshStreak,
   dailyConfig,
   dailySeed,
   dailySettings,
@@ -191,5 +195,77 @@ describe('game timer and load', () => {
     expect(reduce(a, { type: 'load', state: b })).toBe(b);
     expect(b.mode).toBe('daily');
     expect(reduce({ ...a, status: 'won' }, { type: 'tick' }).elapsed).toBe(0);
+  });
+});
+
+describe('streak freezes', () => {
+  const day = (key: string): DailyResult => ({
+    key, difficulty: 'easy', phantom: false, elapsed: 1, moves: 1, shifts: 0, hints: 0,
+    phantomsRecalled: 0, phantomsMissed: 0, xp: 1,
+  });
+
+  function withDays(keys: string[], extra: Partial<ReturnType<typeof emptyProfile>> = {}) {
+    const p = emptyProfile();
+    for (const k of keys) p.daily[k] = day(k);
+    return { ...p, ...extra };
+  }
+
+  it('grants one freeze per calendar month, capped', () => {
+    let p = emptyProfile();
+    p = grantMonthlyFreeze(p, '2026-09-06');
+    expect(p.freezes).toBe(1);
+    expect(p.lastFreezeGrant).toBe('2026-09');
+    // Same month again is a no-op.
+    expect(grantMonthlyFreeze(p, '2026-09-20')).toBe(p);
+    p = grantMonthlyFreeze(p, '2026-10-01');
+    p = grantMonthlyFreeze(p, '2026-11-01');
+    expect(p.freezes).toBe(3);
+    p = grantMonthlyFreeze(p, '2026-12-01');
+    expect(p.freezes).toBe(MAX_FREEZES);
+  });
+
+  it('spends a freeze to cover a missed day and keeps the streak alive', () => {
+    // Played the 3rd and 4th, missed the 5th, opening the app on the 6th.
+    const p = withDays(['2026-09-03', '2026-09-04'], { freezes: 1 });
+    expect(currentStreak(p.daily, '2026-09-06')).toBe(0);
+    const after = applyStreakFreeze(p, '2026-09-06');
+    expect(after.freezes).toBe(0);
+    expect(after.frozenDays['2026-09-05']).toBe(true);
+    expect(currentStreak(after.daily, '2026-09-06', after.frozenDays)).toBe(3);
+  });
+
+  it('does not spend a freeze when there is nothing to save', () => {
+    // Yesterday was played, so no gap.
+    const played = withDays(['2026-09-05'], { freezes: 1 });
+    expect(applyStreakFreeze(played, '2026-09-06')).toBe(played);
+    // The streak is already broken two days back, so a freeze would not rescue it.
+    const broken = withDays(['2026-09-01'], { freezes: 1 });
+    expect(applyStreakFreeze(broken, '2026-09-06')).toBe(broken);
+    // No freezes banked.
+    const poor = withDays(['2026-09-03', '2026-09-04'], { freezes: 0 });
+    expect(applyStreakFreeze(poor, '2026-09-06')).toBe(poor);
+  });
+
+  it('only ever covers one day per opening', () => {
+    const p = withDays(['2026-09-02'], { freezes: 3 });
+    const after = refreshStreak(p, '2026-09-06');
+    // 09-03, 09-04 and 09-05 are all missing, so nothing is rescued.
+    expect(Object.keys(after.frozenDays)).toEqual([]);
+    expect(after.freezes).toBe(3);
+  });
+
+  it('refreshStreak grants then spends in one call', () => {
+    const p = withDays(['2026-09-03', '2026-09-04'], { freezes: 0, lastFreezeGrant: null });
+    const after = refreshStreak(p, '2026-09-06');
+    expect(after.freezes).toBe(0); // granted one, spent it
+    expect(after.frozenDays['2026-09-05']).toBe(true);
+    expect(currentStreak(after.daily, '2026-09-06', after.frozenDays)).toBe(3);
+  });
+
+  it('normalizes a profile saved before freezes existed', () => {
+    const p = normalizeProfile({ xp: 10 });
+    expect(p.freezes).toBe(0);
+    expect(p.frozenDays).toEqual({});
+    expect(p.lastFreezeGrant).toBeNull();
   });
 });

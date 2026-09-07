@@ -94,15 +94,75 @@ export interface DailyResult {
   xp: number;
 }
 
-/** Consecutive completed dailies ending today, or yesterday if today is open. */
-export function currentStreak(daily: Record<string, DailyResult>, todayKey: string): number {
-  let key = daily[todayKey] ? todayKey : shiftDateKey(todayKey, -1);
+/** The most freezes a player may bank at once. */
+export const MAX_FREEZES = 3;
+
+export type FrozenDays = Record<string, true>;
+
+/** A day counts towards the streak when it was played or covered by a freeze. */
+function dayHeld(
+  daily: Record<string, DailyResult>,
+  frozen: FrozenDays,
+  key: string,
+): boolean {
+  return !!daily[key] || !!frozen[key];
+}
+
+/** Consecutive held dailies ending today, or yesterday if today is open. */
+export function currentStreak(
+  daily: Record<string, DailyResult>,
+  todayKey: string,
+  frozen: FrozenDays = {},
+): number {
+  let key = dayHeld(daily, frozen, todayKey) ? todayKey : shiftDateKey(todayKey, -1);
   let n = 0;
-  while (daily[key]) {
+  while (dayHeld(daily, frozen, key)) {
     n++;
     key = shiftDateKey(key, -1);
   }
   return n;
+}
+
+/** Calendar month of a date key, e.g. "2026-09". */
+function monthOf(key: string): string {
+  return key.slice(0, 7);
+}
+
+/**
+ * Grants one freeze at the start of each calendar month, up to MAX_FREEZES.
+ * The first call ever also grants one, so a new player has a safety net.
+ */
+export function grantMonthlyFreeze(profile: Profile, todayKey: string): Profile {
+  const month = monthOf(todayKey);
+  if (profile.lastFreezeGrant === month) return profile;
+  return {
+    ...profile,
+    freezes: Math.min(MAX_FREEZES, profile.freezes + 1),
+    lastFreezeGrant: month,
+  };
+}
+
+/**
+ * Spends a freeze to cover yesterday, but only when that actually rescues a
+ * streak: there must be a run to save behind it, and a freeze is never spent
+ * on a streak that is already broken further back.
+ */
+export function applyStreakFreeze(profile: Profile, todayKey: string): Profile {
+  if (profile.freezes <= 0) return profile;
+  const yesterday = shiftDateKey(todayKey, -1);
+  if (dayHeld(profile.daily, profile.frozenDays, yesterday)) return profile;
+  const before = shiftDateKey(yesterday, -1);
+  if (!dayHeld(profile.daily, profile.frozenDays, before)) return profile;
+  return {
+    ...profile,
+    freezes: profile.freezes - 1,
+    frozenDays: { ...profile.frozenDays, [yesterday]: true },
+  };
+}
+
+/** Both of the above, run once when the app opens. */
+export function refreshStreak(profile: Profile, todayKey: string): Profile {
+  return applyStreakFreeze(grantMonthlyFreeze(profile, todayKey), todayKey);
 }
 
 export function formatClock(totalSeconds: number): string {
@@ -214,6 +274,12 @@ export interface Profile {
   totals: Totals;
   daily: Record<string, DailyResult>;
   bestStreak: number;
+  /** Unspent streak freezes. */
+  freezes: number;
+  /** Days rescued by a freeze. */
+  frozenDays: FrozenDays;
+  /** Calendar month of the last monthly grant, e.g. "2026-09". */
+  lastFreezeGrant: string | null;
 }
 
 const EMPTY_DIFFICULTY: DifficultyStats = {
@@ -251,6 +317,9 @@ export function emptyProfile(): Profile {
     },
     daily: {},
     bestStreak: 0,
+    freezes: 0,
+    frozenDays: {},
+    lastFreezeGrant: null,
   };
 }
 
@@ -271,6 +340,9 @@ export function normalizeProfile(raw: unknown): Profile {
     totals: { ...empty.totals, ...(p.totals ?? {}) },
     daily: p.daily && typeof p.daily === 'object' ? p.daily : {},
     bestStreak: typeof p.bestStreak === 'number' ? p.bestStreak : 0,
+    freezes: typeof p.freezes === 'number' ? p.freezes : 0,
+    frozenDays: p.frozenDays && typeof p.frozenDays === 'object' ? p.frozenDays : {},
+    lastFreezeGrant: typeof p.lastFreezeGrant === 'string' ? p.lastFreezeGrant : null,
   };
 }
 
@@ -395,7 +467,7 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
     };
   }
 
-  const streak = currentStreak(next.daily, state.dailyKey ?? dateKey(now));
+  const streak = currentStreak(next.daily, state.dailyKey ?? dateKey(now), next.frozenDays);
   next = { ...next, bestStreak: Math.max(next.bestStreak, streak) };
 
   const ctx: WinContext = { state, profile: next, streak };
