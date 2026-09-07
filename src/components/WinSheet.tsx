@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { GameState, WinOutcome, levelInfo } from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
+import Confetti from './ui/Confetti';
 import { formatTime } from '../utils/time';
 
 interface Props {
@@ -26,6 +27,7 @@ function Stat({ label, value, styles }: { label: string; value: string; styles: 
 
 export default function WinSheet({ visible, state, outcome, onClose, onNewGame, onShare }: Props) {
   const styles = useStyles(makeStyles);
+  const { width } = useWindowDimensions();
   const daily = state.mode === 'daily';
   const level = outcome ? levelInfo(outcome.profile.xp) : null;
   return (
@@ -48,6 +50,12 @@ export default function WinSheet({ visible, state, outcome, onClose, onNewGame, 
         </>
       }
     >
+      <Confetti
+        runKey={state.seed}
+        width={width}
+        active={visible}
+        reduceMotion={state.settings.reduceMotion}
+      />
       <Text style={styles.lead}>
         {daily
           ? `You beat today’s daily${outcome && outcome.streak > 1 ? ` and your streak is ${outcome.streak} days` : ''}.`

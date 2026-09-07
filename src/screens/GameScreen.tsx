@@ -2,6 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   AppState,
@@ -61,6 +62,7 @@ import {
   saveProfile,
 } from '../storage';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
+import { describeShift } from '../utils/describe';
 import { formatTime } from '../utils/time';
 
 interface Loaded {
@@ -242,12 +244,36 @@ function GameView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.elapsed]);
 
-  // Feedback when a shift lands.
+  // Feedback when a shift lands. The board rearranging is invisible to a
+  // screen reader, so it is spoken as well as felt.
   const lastShiftCount = useRef(state.shiftCount);
   useEffect(() => {
-    if (state.shiftCount > lastShiftCount.current) haptic('shift');
+    if (state.shiftCount > lastShiftCount.current) {
+      haptic('shift');
+      if (state.lastShift) {
+        AccessibilityInfo.announceForAccessibility(
+          describeShift(state.lastShift.description, state.selected),
+        );
+      }
+    }
     lastShiftCount.current = state.shiftCount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.shiftCount]);
+
+  // A digit fading away is likewise silent without this.
+  const lastPhantomCount = useRef(state.phantomCount);
+  useEffect(() => {
+    if (state.phantomCount > lastPhantomCount.current && state.lastPhantom) {
+      const ph = state.lastPhantom;
+      AccessibilityInfo.announceForAccessibility(
+        `A ${ph.wasGiven ? 'given' : 'digit'} faded away. That cell is locked for ${
+          ph.unlockAtMove - ph.createdAtMove
+        } moves.`,
+      );
+    }
+    lastPhantomCount.current = state.phantomCount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phantomCount]);
 
   // A win: fold it into the profile once per game.
   const wonSeed = useRef<number | null>(initial.free.status === 'won' ? initial.free.seed : null);

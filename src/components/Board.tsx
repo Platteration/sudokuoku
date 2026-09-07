@@ -12,6 +12,7 @@ import {
   rowOf,
 } from '../engine';
 import { Colors, useStyles, useTheme } from '../theme';
+import { describeCell } from '../utils/describe';
 
 interface Props {
   state: GameState;
@@ -175,7 +176,8 @@ export default function Board({ state, size, onSelect }: Props) {
           key={pos}
           onPress={() => onSelect(pos)}
           accessibilityRole="button"
-          accessibilityLabel={`Row ${rowOf(pos) + 1} column ${colOf(pos) + 1}`}
+          accessibilityLabel={describeCell(state, pos)}
+          accessibilityState={{ selected: pos === selected, disabled: isLocked(state, pos) }}
           style={[
             styles.cell,
             {
@@ -205,6 +207,23 @@ export default function Board({ state, size, onSelect }: Props) {
           ]}
         />
       ))}
+      {/* The selection ring is drawn above the cells so it survives the
+          peer and conflict tints, and makes the current cell easy to find
+          again once the board has moved. */}
+      {selected !== null ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.ring,
+            {
+              left: colOf(selected) * cell,
+              top: rowOf(selected) * cell,
+              width: cell,
+              height: cell,
+            },
+          ]}
+        />
+      ) : null}
       {/* Thick box lines. */}
       {lines.map((offset) => (
         <View
@@ -323,6 +342,12 @@ const makeStyles = (colors: Colors) =>
   flash: {
     position: 'absolute',
     backgroundColor: colors.primarySoft,
+  },
+  ring: {
+    position: 'absolute',
+    borderWidth: 2.5,
+    borderColor: colors.primary,
+    borderRadius: 3,
   },
   thickLine: {
     position: 'absolute',

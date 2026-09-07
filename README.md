@@ -23,6 +23,15 @@ Store builds use [EAS Build](https://docs.expo.dev/build/introduction/):
 `npx eas build --platform ios` / `--platform android`. Bundle identifiers are
 set in `app.json`.
 
+## Accessibility
+
+Because the board rearranges under the player, position alone is not enough to
+describe it. Every cell announces its contents as well as its coordinates
+("Row 3, column 5, 7, given" / "empty, noted 1, 5 and 7" / "faded and locked
+for 3 more moves"), and each shift and each fading digit is announced through
+`AccessibilityInfo`, so the movement is not silent. A colourblind-safe High
+contrast pack and a reduce motion switch are in Settings.
+
 ## Checks
 
 ```bash

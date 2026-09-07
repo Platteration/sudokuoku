@@ -269,3 +269,19 @@ describe('streak freezes', () => {
     expect(p.lastFreezeGrant).toBeNull();
   });
 });
+
+describe('badge integrity', () => {
+  it('does not hand out the speed badge for a hint-spammed win', () => {
+    const fast = winGame(newGame({ ...DEFAULT_SETTINGS, difficulty: 'medium', enabledShifts: [] }, 61), 120);
+    const clean = recordGameWin(emptyProfile(), fast, new Date(2026, 8, 6));
+    expect(clean.newBadges.map((b) => b.id)).toContain('speed');
+
+    const hinted = { ...fast, hintsUsed: 40 };
+    const out = recordGameWin(emptyProfile(), hinted, new Date(2026, 8, 6));
+    expect(out.newBadges.map((b) => b.id)).not.toContain('speed');
+    expect(out.newBadges.map((b) => b.id)).not.toContain('no-hints');
+    // The win itself still counts, and XP never goes negative.
+    expect(out.newBadges.map((b) => b.id)).toContain('first-win');
+    expect(out.xpGained).toBe(10);
+  });
+});

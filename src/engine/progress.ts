@@ -383,7 +383,7 @@ const defs: [Badge, Check][] = [
   [{ id: 'win-hard', title: 'Hard Headed', description: 'Win a hard game.', icon: '🪨', group: 'wins' }, ({ profile }) => profile.stats.hard.won >= 1],
   [{ id: 'win-expert', title: 'Unshakeable', description: 'Win an expert game.', icon: '🏔', group: 'wins' }, ({ profile }) => profile.stats.expert.won >= 1],
   [{ id: 'all-difficulties', title: 'Full Spectrum', description: 'Win at every difficulty.', icon: '🌈', group: 'wins' }, ({ profile }) => (['easy', 'medium', 'hard', 'expert'] as Difficulty[]).every((d) => profile.stats[d].won >= 1)],
-  [{ id: 'speed', title: 'Quick Hands', description: 'Win a medium or harder game in under 10 minutes.', icon: '⚡', group: 'wins' }, ({ state }) => state.settings.difficulty !== 'easy' && state.elapsed < 600],
+  [{ id: 'speed', title: 'Quick Hands', description: 'Win a medium or harder game in under 10 minutes, with at most two hints.', icon: '⚡', group: 'wins' }, ({ state }) => state.settings.difficulty !== 'easy' && state.elapsed < 600 && state.hintsUsed <= 2],
   [{ id: 'no-hints', title: 'Unassisted', description: 'Win without using a hint.', icon: '🧠', group: 'style' }, ({ state }) => state.hintsUsed === 0],
   [{ id: 'hintless-10', title: 'Self Reliant', description: 'Win 10 games without hints.', icon: '🦉', group: 'style' }, ({ profile }) => profile.totals.hintlessWins >= 10],
   [{ id: 'shifts-100', title: 'Sea Legs', description: 'Survive 100 shifts in total.', icon: '🌊', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 100],
