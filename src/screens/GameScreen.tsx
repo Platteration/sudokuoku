@@ -453,7 +453,7 @@ function GameView({
         onNewGame={(difficulty) => startNewGame(difficulty)}
         onHelp={() => setShowHelp(true)}
       />
-      <HelpSheet visible={showHelp} onClose={closeHelp} />
+      <HelpSheet visible={showHelp} reduceMotion={state.settings.reduceMotion} onClose={closeHelp} />
       <DailySheet
         visible={showDaily}
         todayKey={todayKey}

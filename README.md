@@ -124,11 +124,35 @@ with markers off) and One Week (7 day streak). New badges are announced on
 the win sheet; the Progress sheet shows them all with the per-difficulty
 statistics, level bar and streak.
 
-Undo rewinds the shift together with the move. Settings let you pick which
-shift kinds are allowed, shift only every 2, 3 or 5 moves, choose a light,
-dark or system appearance, and toggle conflict / mistake highlighting and
-animation. Everything is saved locally: the free game, the daily in progress,
-and the profile with statistics, XP, badges and daily history.
+## Presets, looks and assists
+
+**Presets** set the rules in one tap and never touch appearance or assistance:
+Zen (nothing moves or fades), Classic, Phantom, Blindfold (phantoms with the
+markers off) and Chaos (two shifts a move, every shift kind including the
+digit relabel, phantoms everywhere). A shift trigger can fire up to four
+shifts back to back via `shiftsPerMove`.
+
+**Colour packs**: Classic, Paper, Terminal, Blueprint, Sunset and a
+colourblind-safe High contrast, each a light and dark palette. **Reduce
+motion** turns off cell sliding, the post-shift flash and the banner pop
+together.
+
+**Shift preview** is an optional assist. Because every shift is drawn from a
+seeded stream keyed on the move count, the game can say exactly what the next
+move will trigger. Set it to name the family (rows, columns, board, boxes,
+digits), spell the move out, or stay off.
+
+**Streak freezes** cover a missed daily. One is granted per calendar month up
+to three, and one is spent on opening only when it actually rescues a run,
+never on a streak that is already broken further back.
+
+The help sheet opens with a small board that cycles through every shift kind
+so the movement can be watched rather than read about. It is driven by the
+real transforms, so it shows exactly what the game does.
+
+Undo rewinds the shift together with the move. Everything is saved locally:
+the free game, the daily in progress, and the profile with statistics, XP,
+badges, streak freezes and daily history.
 
 ## Code layout
 
@@ -138,11 +162,13 @@ src/engine/rng.ts           seeded PRNG so games and shifts are reproducible
 src/engine/sudoku.ts        grid helpers, solver, uniqueness check, generator
 src/engine/transforms.ts    the shift kinds and how they permute the board
 src/engine/game.ts          game state + reducer (moves, shifts, phantoms, undo, hints, win)
-src/engine/progress.ts      daily challenge, streaks, XP, levels and badges
+src/engine/progress.ts      daily challenge, streaks, freezes, XP, levels and badges
+src/engine/presets.ts       named rule sets (Zen, Classic, Phantom, Blindfold, Chaos)
 src/engine/__tests__/       vitest suites for all of the above
 src/components/Board.tsx    two-layer board; cells animate to their new spots
+src/components/ShiftDemo.tsx  auto-playing board that demonstrates each shift kind
 src/components/*            number pad, controls, shift banner, sheets
 src/screens/GameScreen.tsx  wires the reducer, timer, persistence, profile, free/daily switching and sheets
 src/storage.ts              AsyncStorage save/load for both games, the profile and flags
-src/theme.tsx               light/dark palettes, ThemeProvider, useStyles
+src/theme.tsx               colour packs, ThemeProvider, useStyles
 ```

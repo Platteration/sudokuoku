@@ -1,21 +1,26 @@
 import React from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions } from 'react-native';
 import { Colors, useStyles } from '../theme';
 import Sheet from './Sheet';
+import ShiftDemo from './ShiftDemo';
 
 interface Props {
   visible: boolean;
+  reduceMotion?: boolean;
   onClose: () => void;
 }
 
-export default function HelpSheet({ visible, onClose }: Props) {
+export default function HelpSheet({ visible, reduceMotion, onClose }: Props) {
   const styles = useStyles(makeStyles);
+  const { width } = useWindowDimensions();
+  const demoSize = Math.min(260, Math.floor(width - 96));
   return (
     <Sheet visible={visible} title="How Sudokuoku works" onClose={onClose}>
       <Text style={styles.p}>
         It is ordinary Sudoku with one twist: after every move the board shifts, and you
         never know which shift is coming.
       </Text>
+      <ShiftDemo size={demoSize} playing={visible} reduceMotion={reduceMotion} />
       <Text style={styles.h}>The shifts</Text>
       <Text style={styles.p}>• The three rows inside one band slide up or down.</Text>
       <Text style={styles.p}>• The three columns inside one stack slide left or right.</Text>
