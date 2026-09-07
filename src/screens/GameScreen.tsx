@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Board from '../components/Board';
+import IconButton from '../components/ui/IconButton';
 import Controls from '../components/Controls';
 import DailySheet from '../components/DailySheet';
 import HelpSheet from '../components/HelpSheet';
@@ -371,10 +372,16 @@ function GameView({
           </Text>
         </View>
         <View style={styles.headerButtons}>
-          <HeaderButton label="📅" a11y="Daily challenge" dot={!dailyDone} onPress={() => setShowDaily(true)} />
-          <HeaderButton label="🏆" a11y="Progress" onPress={() => setShowProgress(true)} />
-          <HeaderButton label="⚙" a11y="Settings" onPress={() => setShowSettings(true)} />
-          <HeaderButton label="＋" a11y="New game" onPress={confirmNewGame} />
+          <IconButton
+            name="daily"
+            label="Daily challenge"
+            badge={!dailyDone}
+            active={isDaily}
+            onPress={() => setShowDaily(true)}
+          />
+          <IconButton name="progress" label="Progress" onPress={() => setShowProgress(true)} />
+          <IconButton name="settings" label="Settings" onPress={() => setShowSettings(true)} />
+          <IconButton name="add" label="New game" onPress={confirmNewGame} />
         </View>
       </View>
 
@@ -439,7 +446,7 @@ function GameView({
         <NumberPad
           remaining={remaining}
           notesMode={state.notesMode}
-          disabled={!playing || state.selected === null || selectedLocked}
+          disabled={!playing || selectedLocked}
           onDigit={(d) => send({ type: 'input', digit: d })}
         />
       </View>
@@ -519,33 +526,6 @@ async function shareMessage(message: string): Promise<void> {
   }
 }
 
-function HeaderButton({
-  label,
-  a11y,
-  dot,
-  onPress,
-}: {
-  label: string;
-  a11y: string;
-  dot?: boolean;
-  onPress: () => void;
-}) {
-  const styles = useStyles(makeStyles);
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={a11y}
-      hitSlop={6}
-      style={({ pressed }) => [styles.headerButton, pressed && { backgroundColor: colors.primarySoft }]}
-    >
-      <Text style={styles.headerButtonText}>{label}</Text>
-      {dot ? <View style={styles.dot} /> : null}
-    </Pressable>
-  );
-}
-
 function Stat({ label, value }: { label: string; value: string }) {
   const styles = useStyles(makeStyles);
   return (
@@ -592,32 +572,6 @@ const makeStyles = (colors: Colors) =>
     headerButtons: {
       flexDirection: 'row',
     },
-    headerButton: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      marginLeft: 6,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.line,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerButtonText: {
-      fontSize: 18,
-      color: colors.text,
-    },
-    dot: {
-      position: 'absolute',
-      top: 2,
-      right: 2,
-      width: 9,
-      height: 9,
-      borderRadius: 5,
-      backgroundColor: colors.danger,
-      borderWidth: 1.5,
-      borderColor: colors.surface,
-    },
     statsRow: {
       flexDirection: 'row',
       marginBottom: 8,
@@ -629,8 +583,8 @@ const makeStyles = (colors: Colors) =>
       borderRadius: radius.sm,
       borderWidth: 1,
       borderColor: colors.line,
-      paddingVertical: 6,
-      marginHorizontal: 2,
+      paddingVertical: 7,
+      marginHorizontal: 2.5,
     },
     statValue: {
       fontSize: 16,

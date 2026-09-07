@@ -12,9 +12,12 @@ import {
   ThemePreference,
   matchingPreset,
 } from '../engine';
-import { Colors, THEME_PACKS, radius, useStyles, useTheme } from '../theme';
+import { Colors, THEME_PACKS, radius, shadow, useStyles, useTheme } from '../theme';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
+import Icon from './ui/Icon';
+import Press from './ui/Press';
+import Segmented from './ui/Segmented';
 
 interface Props {
   visible: boolean;
@@ -48,54 +51,36 @@ const TARGET_LABEL: Record<PhantomTarget, string> = {
   both: 'Both',
 };
 
-function Segmented<T extends string | number>({
-  options,
-  value,
-  onChange,
-  label,
-}: {
-  options: T[];
-  value: T;
-  onChange: (v: T) => void;
-  label: (v: T) => string;
-}) {
-  const styles = useStyles(makeStyles);
-  return (
-    <View style={styles.segmented}>
-      {options.map((o) => {
-        const active = o === value;
-        return (
-          <Pressable
-            key={String(o)}
-            onPress={() => onChange(o)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            style={[styles.segment, active && styles.segmentActive]}
-          >
-            <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>{label(o)}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 function Row({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
   const styles = useStyles(makeStyles);
   const { colors } = useTheme();
   return (
-    <View style={styles.row}>
+    <Press
+      onPress={() => onChange(!value)}
+      scaleTo={0.985}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: value }}
+      style={[styles.row, value && styles.rowOn]}
+    >
       <View style={{ flex: 1 }}>
         <Text style={styles.rowLabel}>{label}</Text>
         {hint ? <Text style={styles.rowHint}>{hint}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: colors.primary }} />
-    </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ true: colors.primary, false: colors.line }}
+        thumbColor={colors.surface}
+        pointerEvents="none"
+      />
+    </Press>
   );
 }
 
 export default function SettingsSheet({ visible, settings, daily, onClose, onChange, onNewGame, onHelp }: Props) {
   const styles = useStyles(makeStyles);
+  const { colors } = useTheme();
   const [difficulty, setDifficulty] = useState<Difficulty>(settings.difficulty);
   const active_preset = matchingPreset(settings)?.id ?? null;
 
@@ -124,6 +109,8 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
       <PrimaryButton
         label="How to play"
         variant="secondary"
+        size="md"
+        icon="help"
         onPress={() => {
           onClose();
           onHelp();
@@ -147,19 +134,28 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         {PRESETS.map((preset) => {
           const active = active_preset === preset.id;
           return (
-            <Pressable
+            <Press
               key={preset.id}
               onPress={() => onChange(preset.rules)}
+              scaleTo={0.985}
               accessibilityRole="button"
+              accessibilityLabel={preset.name}
               accessibilityState={{ selected: active }}
               style={[styles.preset, active && styles.presetActive]}
             >
-              <Text style={styles.presetIcon}>{preset.icon}</Text>
+              <View style={styles.presetIcon}>
+                <Icon
+                  name={preset.icon}
+                  size={20}
+                  color={active ? colors.primary : colors.textMuted}
+                />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.presetName, active && styles.presetNameActive]}>{preset.name}</Text>
                 <Text style={styles.presetDesc}>{preset.description}</Text>
               </View>
-            </Pressable>
+              {active ? <Icon name="check" size={18} color={colors.primary} /> : null}
+            </Press>
           );
         })}
       </View>
@@ -275,14 +271,16 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
           const active = pack.id === settings.themePack;
           const swatch = settings.theme === 'dark' ? pack.dark : pack.light;
           return (
-            <Pressable
+            <Press
               key={pack.id}
               onPress={() => onChange({ themePack: pack.id })}
+              scaleTo={0.97}
               accessibilityRole="button"
+              accessibilityLabel={pack.name}
               accessibilityState={{ selected: active }}
-              style={[styles.pack, active && styles.packActive]}
+              style={styles.pack}
             >
-              <View style={styles.swatchRow}>
+              <View style={[styles.swatchRow, active && styles.swatchRowActive]}>
                 {[swatch.background, swatch.surface, swatch.primary, swatch.accent, swatch.phantom].map(
                   (c, i) => (
                     <View key={i} style={[styles.swatch, { backgroundColor: c }]} />
@@ -293,7 +291,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
               <Text style={styles.packDesc} numberOfLines={2}>
                 {pack.description}
               </Text>
-            </Pressable>
+            </Press>
           );
         })}
       </View>
@@ -368,7 +366,12 @@ const makeStyles = (colors: Colors) =>
     backgroundColor: colors.primarySoft,
   },
   presetIcon: {
-    fontSize: 22,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.cellPeer,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 10,
   },
   presetName: {
@@ -399,7 +402,11 @@ const makeStyles = (colors: Colors) =>
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.line,
-    height: 28,
+    height: 32,
+  },
+  swatchRowActive: {
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   swatch: {
     flex: 1,
@@ -468,10 +475,13 @@ const makeStyles = (colors: Colors) =>
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: 6,
     borderWidth: 1,
     borderColor: colors.line,
+  },
+  rowOn: {
+    borderColor: colors.primary,
   },
   rowLabel: {
     fontSize: 15,

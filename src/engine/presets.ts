@@ -26,7 +26,8 @@ export interface Preset {
   id: string;
   name: string;
   description: string;
-  icon: string;
+  /** Key into the app's icon vocabulary, see components/ui/Icon. */
+  icon: 'zen' | 'dice' | 'phantomMode' | 'blindfold' | 'chaos';
   rules: Rules;
 }
 
@@ -49,35 +50,35 @@ export const PRESETS: Preset[] = [
     id: 'zen',
     name: 'Zen',
     description: 'Plain Sudoku. Nothing moves, nothing fades.',
-    icon: '🍵',
+    icon: 'zen',
     rules: { ...base, enabledShifts: [], shiftsPerMove: 1 },
   },
   {
     id: 'classic',
     name: 'Classic',
     description: 'One shift after every move. The house rules.',
-    icon: '🎲',
+    icon: 'dice',
     rules: { ...base },
   },
   {
     id: 'phantom',
     name: 'Phantom',
     description: 'Shifts, plus digits that fade away and lock.',
-    icon: '👻',
+    icon: 'phantomMode',
     rules: { ...base, phantomMode: true },
   },
   {
     id: 'blindfold',
     name: 'Blindfold',
     description: 'Phantoms with no markers. Track them from memory.',
-    icon: '🕶',
+    icon: 'blindfold',
     rules: { ...base, phantomMode: true, phantomMarkers: false },
   },
   {
     id: 'chaos',
     name: 'Chaos',
     description: 'Two shifts a move, digits relabel, phantoms everywhere.',
-    icon: '🌪',
+    icon: 'chaos',
     rules: {
       ...base,
       enabledShifts: ALL_SHIFT_KINDS,

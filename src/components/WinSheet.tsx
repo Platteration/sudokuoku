@@ -35,9 +35,16 @@ export default function WinSheet({ visible, state, outcome, onClose, onNewGame, 
       onClose={onClose}
       footer={
         <>
-          {daily && onShare ? <PrimaryButton label="Share result" onPress={onShare} /> : null}
-          <PrimaryButton label={daily ? 'Play a free game' : 'Play again'} variant={daily ? 'secondary' : 'primary'} onPress={onNewGame} />
-          <PrimaryButton label="Admire the board" variant="secondary" onPress={onClose} />
+          {daily && onShare ? (
+            <PrimaryButton label="Share result" icon="share" onPress={onShare} />
+          ) : null}
+          <PrimaryButton
+            label={daily ? 'Play a free game' : 'Play again'}
+            icon="add"
+            variant={daily ? 'secondary' : 'primary'}
+            onPress={onNewGame}
+          />
+          <PrimaryButton label="Admire the board" variant="ghost" size="md" onPress={onClose} />
         </>
       }
     >

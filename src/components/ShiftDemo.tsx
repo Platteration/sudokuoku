@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import {
   DEFAULT_SETTINGS,
   GameState,
@@ -17,8 +17,10 @@ import {
   stackColsShift,
   stacksShift,
 } from '../engine';
-import { Colors, radius, useStyles } from '../theme';
+import { Colors, radius, useStyles, useTheme } from '../theme';
 import Board from './Board';
+import Icon from './ui/Icon';
+import Press from './ui/Press';
 
 interface Props {
   size: number;
@@ -49,6 +51,7 @@ const STEP_MS = 2400;
  */
 export default function ShiftDemo({ size, playing, reduceMotion }: Props) {
   const styles = useStyles(makeStyles);
+  const { colors } = useTheme();
 
   const start = useMemo<GameState>(() => {
     const base = newGame(
@@ -105,22 +108,24 @@ export default function ShiftDemo({ size, playing, reduceMotion }: Props) {
         </Text>
       </View>
       <View style={styles.controls}>
-        <Pressable
+        <Press
           onPress={() => setRunning((r) => !r)}
           accessibilityRole="button"
           accessibilityLabel={running ? 'Pause the demo' : 'Play the demo'}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          style={styles.button}
         >
-          <Text style={styles.buttonText}>{running ? '❚❚ Pause' : '▶ Play'}</Text>
-        </Pressable>
-        <Pressable
+          <Icon name={running ? 'pause' : 'play'} size={14} color={colors.text} />
+          <Text style={styles.buttonText}>{running ? 'Pause' : 'Play'}</Text>
+        </Press>
+        <Press
           onPress={advance}
           accessibilityRole="button"
           accessibilityLabel="Show the next shift"
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          style={styles.button}
         >
-          <Text style={styles.buttonText}>Next ▸</Text>
-        </Pressable>
+          <Icon name="next" size={14} color={colors.text} />
+          <Text style={styles.buttonText}>Next</Text>
+        </Press>
         <View style={styles.dots}>
           {STEPS.map((s, i) => (
             <View
@@ -167,20 +172,21 @@ const makeStyles = (colors: Colors) =>
       marginTop: 8,
     },
     button: {
-      paddingVertical: 6,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 7,
       paddingHorizontal: 12,
-      borderRadius: radius.sm,
+      borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: colors.line,
+      backgroundColor: colors.surface,
       marginRight: 6,
-    },
-    buttonPressed: {
-      backgroundColor: colors.primarySoft,
     },
     buttonText: {
       fontSize: 13,
       fontWeight: '600',
       color: colors.text,
+      marginLeft: 6,
     },
     dots: {
       flexDirection: 'row',

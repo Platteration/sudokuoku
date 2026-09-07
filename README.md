@@ -166,6 +166,7 @@ src/engine/progress.ts      daily challenge, streaks, freezes, XP, levels and ba
 src/engine/presets.ts       named rule sets (Zen, Classic, Phantom, Blindfold, Chaos)
 src/engine/__tests__/       vitest suites for all of the above
 src/components/Board.tsx    two-layer board; cells animate to their new spots
+src/components/ui/          shared button layer: Press, Icon, IconButton, Segmented
 src/components/ShiftDemo.tsx  auto-playing board that demonstrates each shift kind
 src/components/*            number pad, controls, shift banner, sheets
 src/screens/GameScreen.tsx  wires the reducer, timer, persistence, profile, free/daily switching and sheets

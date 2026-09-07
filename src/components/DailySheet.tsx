@@ -51,10 +51,15 @@ export default function DailySheet(p: Props) {
       onClose={p.onClose}
       footer={
         result ? (
-          <PrimaryButton label="Share result" onPress={() => p.onShare(shareText(result, streak))} />
+          <PrimaryButton
+            label="Share result"
+            icon="share"
+            onPress={() => p.onShare(shareText(result, streak))}
+          />
         ) : (
           <PrimaryButton
             label={p.active ? 'Back to the board' : p.inProgress ? 'Continue today’s daily' : 'Play today’s daily'}
+            icon={p.inProgress || p.active ? 'chevron' : 'play'}
             onPress={() => {
               p.onPlay();
               p.onClose();

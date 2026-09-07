@@ -35,7 +35,11 @@ export default function ProgressSheet({ visible, profile, todayKey, onClose, onR
       visible={visible}
       title="Progress"
       onClose={onClose}
-      footer={profile.totals.played > 0 ? <PrimaryButton label="Reset progress" variant="secondary" onPress={onReset} /> : undefined}
+      footer={
+        profile.totals.played > 0 ? (
+          <PrimaryButton label="Reset progress" variant="danger" size="md" onPress={onReset} />
+        ) : undefined
+      }
     >
       <View style={styles.levelCard}>
         <View style={styles.levelRow}>
