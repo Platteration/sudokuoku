@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, GameState, newGame, reduce } from '../game';
 import {
   BADGES,
+  CLEAN_HINT_LIMIT,
   DailyResult,
   MAX_FREEZES,
+  isCleanWin,
   applyStreakFreeze,
   currentStreak,
   grantMonthlyFreeze,
@@ -283,5 +285,53 @@ describe('badge integrity', () => {
     // The win itself still counts, and XP never goes negative.
     expect(out.newBadges.map((b) => b.id)).toContain('first-win');
     expect(out.xpGained).toBe(10);
+  });
+});
+
+describe('badges cannot be farmed with hints', () => {
+  const winWith = (over: Partial<ReturnType<typeof winGame>>) => ({
+    ...winGame(newGame({ ...DEFAULT_SETTINGS, difficulty: 'hard', enabledShifts: [] }, 62), 200),
+    ...over,
+  });
+
+  it('a hint-heavy win still counts as a win but earns no skill badge', () => {
+    const hinted = winWith({ hintsUsed: 30 });
+    const out = recordGameWin(emptyProfile(), hinted, new Date(2026, 8, 6));
+    expect(out.profile.stats.hard.won).toBe(1);
+    expect(out.profile.stats.hard.cleanWins).toBe(0);
+    expect(out.profile.totals.cleanWins).toBe(0);
+    const ids = out.newBadges.map((b) => b.id);
+    expect(ids).toContain('first-win');
+    expect(ids).not.toContain('win-hard');
+    expect(ids).not.toContain('speed');
+  });
+
+  it('a win inside the hint limit earns it', () => {
+    const clean = winWith({ hintsUsed: CLEAN_HINT_LIMIT });
+    const out = recordGameWin(emptyProfile(), clean, new Date(2026, 8, 6));
+    expect(out.profile.stats.hard.cleanWins).toBe(1);
+    expect(out.newBadges.map((b) => b.id)).toContain('win-hard');
+    expect(isCleanWin(clean)).toBe(true);
+    expect(isCleanWin(winWith({ hintsUsed: CLEAN_HINT_LIMIT + 1 }))).toBe(false);
+  });
+
+  it('Full Spectrum needs a clean win at every difficulty', () => {
+    let profile = emptyProfile();
+    for (const d of ['easy', 'medium', 'hard', 'expert'] as const) {
+      const hintedWin = {
+        ...winGame(newGame({ ...DEFAULT_SETTINGS, difficulty: d, enabledShifts: [] }, 63), 200),
+        hintsUsed: 20,
+      };
+      profile = recordGameWin(profile, hintedWin, new Date(2026, 8, 6)).profile;
+    }
+    expect(profile.badges['all-difficulties']).toBeUndefined();
+    expect(profile.totals.won).toBe(4);
+  });
+
+  it('normalizes a profile saved before clean wins were tracked', () => {
+    const p = normalizeProfile({ stats: { hard: { won: 5 } }, totals: { won: 5 } });
+    expect(p.stats.hard.cleanWins).toBe(0);
+    expect(p.totals.cleanWins).toBe(0);
+    expect(p.totals.won).toBe(5);
   });
 });

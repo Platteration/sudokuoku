@@ -1,6 +1,14 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { BADGES, Badge, Difficulty, Profile, currentStreak, levelInfo } from '../engine';
+import {
+  BADGES,
+  Badge,
+  CLEAN_HINT_LIMIT,
+  Difficulty,
+  Profile,
+  currentStreak,
+  levelInfo,
+} from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 import { formatTime } from '../utils/time';
 import PrimaryButton from './PrimaryButton';
@@ -66,6 +74,10 @@ export default function ProgressSheet({ visible, profile, todayKey, onClose, onR
       </View>
 
       <Text style={styles.section}>Badges</Text>
+      <Text style={styles.note}>
+        Badges that claim skill need an unaided win, meaning at most {CLEAN_HINT_LIMIT} hints.
+        Every win still counts towards your totals and XP.
+      </Text>
       {GROUPS.map((g) => (
         <View key={g.key}>
           <Text style={styles.groupTitle}>{g.title}</Text>
@@ -97,6 +109,7 @@ export default function ProgressSheet({ visible, profile, todayKey, onClose, onR
               <Text style={styles.cardTitle}>{d[0].toUpperCase() + d.slice(1)}</Text>
               <Text style={styles.cardMeta}>
                 {s.won}/{s.played} won
+                {s.won > 0 ? ` · ${s.cleanWins} unaided` : ''}
               </Text>
             </View>
             <View style={styles.row}>
@@ -193,6 +206,11 @@ const makeStyles = (colors: Colors) =>
       color: colors.textMuted,
       marginTop: 2,
       textAlign: 'center',
+    },
+    note: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginBottom: 4,
     },
     section: {
       fontSize: 13,

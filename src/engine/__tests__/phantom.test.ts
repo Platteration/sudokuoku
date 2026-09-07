@@ -221,3 +221,41 @@ describe('phantoms and the rest of the game', () => {
     expect(s.phantomCount).toBe(2);
   });
 });
+
+describe('hints are not recalls', () => {
+  /** Plays until a phantom exists, then returns the game and that cell. */
+  function untilPhantom(seed: number) {
+    let s = newGame({ ...PHANTOM, phantomEvery: 2, phantomLockMoves: 2 }, seed);
+    s = playCorrect(s);
+    s = playCorrect(s);
+    const pos = phantomPositions(s)[0];
+    return { s, pos };
+  }
+
+  it('hinting a faded cell scores a miss, never a recall', () => {
+    let { s, pos } = untilPhantom(51);
+    const token = s.tokens[pos];
+    const faded = s.phantoms[pos]!.value;
+    // The faded digit is the solution here, so a hint would "match" it.
+    expect(faded).toBe(s.solution[pos]);
+    for (let i = 0; i < 2; i++) s = playCorrect(s);
+    const where = s.tokens.indexOf(token);
+    expect(isLocked(s, where)).toBe(false);
+    const hinted = run(s, { type: 'select', pos: where }, { type: 'hint' });
+    expect(hinted.values[where]).toBe(hinted.solution[where]);
+    expect(hinted.phantomsRecalled).toBe(0);
+    expect(hinted.phantomsMissed).toBe(1);
+    expect(hinted.phantoms[where]).toBeNull();
+  });
+
+  it('typing the same digit yourself still scores a recall', () => {
+    let { s, pos } = untilPhantom(51);
+    const token = s.tokens[pos];
+    const faded = s.phantoms[pos]!.value;
+    for (let i = 0; i < 2; i++) s = playCorrect(s);
+    const where = s.tokens.indexOf(token);
+    const typed = run(s, { type: 'select', pos: where }, { type: 'input', digit: faded });
+    expect(typed.phantomsRecalled).toBe(1);
+    expect(typed.phantomsMissed).toBe(0);
+  });
+});

@@ -66,6 +66,12 @@ export default function HelpSheet({ visible, reduceMotion, onClose }: Props) {
         your level and title, and milestones unlock badges. The trophy button shows all of it,
         together with your statistics.
       </Text>
+      <Text style={styles.h}>Hints and badges</Text>
+      <Text style={styles.p}>
+        A hint fills in the answer, so it never counts as remembering a faded digit, and badges
+        that claim skill need a win with at most three hints. Every win still counts towards your
+        totals, your streak and your XP, minus a little for each hint taken.
+      </Text>
       <Text style={styles.h}>Tips</Text>
       <Text style={styles.p}>• Your selection follows the cell it was on, so you can keep working there.</Text>
       <Text style={styles.p}>• Notes do not count as moves, so pencil freely.</Text>

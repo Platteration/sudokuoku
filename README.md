@@ -133,6 +133,13 @@ with markers off) and One Week (7 day streak). New badges are announced on
 the win sheet; the Progress sheet shows them all with the per-difficulty
 statistics, level bar and streak.
 
+Because a hint fills the answer in, two rules keep the rewards honest. A
+hinted phantom never counts as a recall, since the hint supplies exactly the
+digit that faded. And badges that claim *skill* require an **unaided win**, at
+most `CLEAN_HINT_LIMIT` (3) hints; volume badges such as the win and shift
+counts accept any win. Wins, streaks and XP always count, XP simply loses 15
+per hint.
+
 ## Presets, looks and assists
 
 **Presets** set the rules in one tap and never touch appearance or assistance:

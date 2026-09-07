@@ -244,9 +244,22 @@ export function levelInfo(xp: number): LevelInfo {
 // ---------------------------------------------------------------------------
 // Profile
 
+/**
+ * A win with more than this many hints is recorded, but does not count
+ * towards badges that claim skill. Hints fill in the answer, so a board
+ * solved mostly by hints was not really solved.
+ */
+export const CLEAN_HINT_LIMIT = 3;
+
+export function isCleanWin(state: GameState): boolean {
+  return state.hintsUsed <= CLEAN_HINT_LIMIT;
+}
+
 export interface DifficultyStats {
   played: number;
   won: number;
+  /** Wins within the hint limit. */
+  cleanWins: number;
   bestTime: number | null;
   fewestShifts: number | null;
   phantomsRecalled: number;
@@ -258,6 +271,7 @@ export type Stats = Record<Difficulty, DifficultyStats>;
 export interface Totals {
   played: number;
   won: number;
+  cleanWins: number;
   shifts: number;
   phantomsRecalled: number;
   phantomsMissed: number;
@@ -285,6 +299,7 @@ export interface Profile {
 const EMPTY_DIFFICULTY: DifficultyStats = {
   played: 0,
   won: 0,
+  cleanWins: 0,
   bestTime: null,
   fewestShifts: null,
   phantomsRecalled: 0,
@@ -309,6 +324,7 @@ export function emptyProfile(): Profile {
     totals: {
       played: 0,
       won: 0,
+      cleanWins: 0,
       shifts: 0,
       phantomsRecalled: 0,
       phantomsMissed: 0,
@@ -371,6 +387,8 @@ interface WinContext {
   state: GameState;
   profile: Profile; // already updated with this win
   streak: number;
+  /** The win was within the hint limit. */
+  clean: boolean;
 }
 
 type Check = (ctx: WinContext) => boolean;
@@ -380,20 +398,20 @@ const defs: [Badge, Check][] = [
   [{ id: 'wins-10', title: 'Regular', description: 'Win 10 games.', icon: '🔟', group: 'wins' }, ({ profile }) => profile.totals.won >= 10],
   [{ id: 'wins-50', title: 'Veteran', description: 'Win 50 games.', icon: '🎖', group: 'wins' }, ({ profile }) => profile.totals.won >= 50],
   [{ id: 'wins-100', title: 'Centurion', description: 'Win 100 games.', icon: '💯', group: 'wins' }, ({ profile }) => profile.totals.won >= 100],
-  [{ id: 'win-hard', title: 'Hard Headed', description: 'Win a hard game.', icon: '🪨', group: 'wins' }, ({ profile }) => profile.stats.hard.won >= 1],
-  [{ id: 'win-expert', title: 'Unshakeable', description: 'Win an expert game.', icon: '🏔', group: 'wins' }, ({ profile }) => profile.stats.expert.won >= 1],
-  [{ id: 'all-difficulties', title: 'Full Spectrum', description: 'Win at every difficulty.', icon: '🌈', group: 'wins' }, ({ profile }) => (['easy', 'medium', 'hard', 'expert'] as Difficulty[]).every((d) => profile.stats[d].won >= 1)],
+  [{ id: 'win-hard', title: 'Hard Headed', description: 'Win a hard game on your own.', icon: '🪨', group: 'wins' }, ({ profile }) => profile.stats.hard.cleanWins >= 1],
+  [{ id: 'win-expert', title: 'Unshakeable', description: 'Win an expert game on your own.', icon: '🏔', group: 'wins' }, ({ profile }) => profile.stats.expert.cleanWins >= 1],
+  [{ id: 'all-difficulties', title: 'Full Spectrum', description: 'Win at every difficulty on your own.', icon: '🌈', group: 'wins' }, ({ profile }) => (['easy', 'medium', 'hard', 'expert'] as Difficulty[]).every((d) => profile.stats[d].cleanWins >= 1)],
   [{ id: 'speed', title: 'Quick Hands', description: 'Win a medium or harder game in under 10 minutes, with at most two hints.', icon: '⚡', group: 'wins' }, ({ state }) => state.settings.difficulty !== 'easy' && state.elapsed < 600 && state.hintsUsed <= 2],
   [{ id: 'no-hints', title: 'Unassisted', description: 'Win without using a hint.', icon: '🧠', group: 'style' }, ({ state }) => state.hintsUsed === 0],
   [{ id: 'hintless-10', title: 'Self Reliant', description: 'Win 10 games without hints.', icon: '🦉', group: 'style' }, ({ profile }) => profile.totals.hintlessWins >= 10],
   [{ id: 'shifts-100', title: 'Sea Legs', description: 'Survive 100 shifts in total.', icon: '🌊', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 100],
   [{ id: 'shifts-1000', title: 'Storm Rider', description: 'Survive 1,000 shifts in total.', icon: '🌀', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 1000],
   [{ id: 'shifts-5000', title: 'Tectonic', description: 'Survive 5,000 shifts in total.', icon: '🌋', group: 'shifts' }, ({ profile }) => profile.totals.shifts >= 5000],
-  [{ id: 'all-shifts', title: 'Everything Moves', description: 'Win with every shift kind enabled, digit shift included.', icon: '🎡', group: 'shifts' }, ({ state }) => ALL_SHIFT_KINDS.every((k) => state.settings.enabledShifts.includes(k))],
-  [{ id: 'relabel', title: 'Renumbered', description: 'Win with the digit shift enabled.', icon: '🔢', group: 'shifts' }, ({ state }) => state.settings.enabledShifts.includes('relabel')],
+  [{ id: 'all-shifts', title: 'Everything Moves', description: 'Win with every shift kind enabled, digit shift included.', icon: '🎡', group: 'shifts' }, ({ state, clean }) => clean && ALL_SHIFT_KINDS.every((k) => state.settings.enabledShifts.includes(k))],
+  [{ id: 'relabel', title: 'Renumbered', description: 'Win with the digit shift enabled.', icon: '🔢', group: 'shifts' }, ({ state, clean }) => clean && state.settings.enabledShifts.includes('relabel')],
   [{ id: 'phantom-first', title: 'Ghost Story', description: 'Recall a faded digit correctly.', icon: '👻', group: 'phantom' }, ({ profile }) => profile.totals.phantomsRecalled >= 1],
-  [{ id: 'phantom-perfect', title: 'Total Recall', description: 'Win with five or more phantoms and no misses.', icon: '🧿', group: 'phantom' }, ({ state }) => state.phantomCount >= 5 && state.phantomsMissed === 0 && state.phantomsRecalled >= 5],
-  [{ id: 'phantom-blind', title: 'Blindfold', description: 'Win a phantom game with the markers switched off.', icon: '🕶', group: 'phantom' }, ({ state }) => state.settings.phantomMode && !state.settings.phantomMarkers && state.phantomCount >= 3],
+  [{ id: 'phantom-perfect', title: 'Total Recall', description: 'Win with five or more phantoms and no misses.', icon: '🧿', group: 'phantom' }, ({ state, clean }) => clean && state.phantomCount >= 5 && state.phantomsMissed === 0 && state.phantomsRecalled >= 5],
+  [{ id: 'phantom-blind', title: 'Blindfold', description: 'Win a phantom game with the markers switched off.', icon: '🕶', group: 'phantom' }, ({ state, clean }) => clean && state.settings.phantomMode && !state.settings.phantomMarkers && state.phantomCount >= 3],
   [{ id: 'phantom-100', title: 'Medium', description: 'Recall 100 faded digits in total.', icon: '🔮', group: 'phantom' }, ({ profile }) => profile.totals.phantomsRecalled >= 100],
   [{ id: 'daily-first', title: 'Day One', description: 'Complete a daily challenge.', icon: '📅', group: 'daily' }, ({ profile }) => profile.totals.dailiesCompleted >= 1],
   [{ id: 'streak-3', title: 'Warming Up', description: 'Keep a 3 day streak.', icon: '🔥', group: 'daily' }, ({ streak }) => streak >= 3],
@@ -420,6 +438,7 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
   const difficulty = state.settings.difficulty;
   const d = profile.stats[difficulty];
   const xpGained = xpForWin(state);
+  const clean = isCleanWin(state);
   const before = levelInfo(profile.xp).level;
 
   let next: Profile = {
@@ -430,6 +449,7 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
       [difficulty]: {
         ...d,
         won: d.won + 1,
+        cleanWins: d.cleanWins + (clean ? 1 : 0),
         bestTime: d.bestTime === null ? state.elapsed : Math.min(d.bestTime, state.elapsed),
         fewestShifts:
           d.fewestShifts === null ? state.shiftCount : Math.min(d.fewestShifts, state.shiftCount),
@@ -440,6 +460,7 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
     totals: {
       ...profile.totals,
       won: profile.totals.won + 1,
+      cleanWins: profile.totals.cleanWins + (clean ? 1 : 0),
       shifts: profile.totals.shifts + state.shiftCount,
       phantomsRecalled: profile.totals.phantomsRecalled + state.phantomsRecalled,
       phantomsMissed: profile.totals.phantomsMissed + state.phantomsMissed,
@@ -470,7 +491,7 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
   const streak = currentStreak(next.daily, state.dailyKey ?? dateKey(now), next.frozenDays);
   next = { ...next, bestStreak: Math.max(next.bestStreak, streak) };
 
-  const ctx: WinContext = { state, profile: next, streak };
+  const ctx: WinContext = { state, profile: next, streak, clean };
   const newBadges: Badge[] = [];
   const badges = { ...next.badges };
   for (const [badge, check] of defs) {

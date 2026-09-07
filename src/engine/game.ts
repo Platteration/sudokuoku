@@ -248,13 +248,22 @@ function lockedPhantomCount(state: GameState): number {
 /**
  * Called when the player fills `pos`: if a faded digit was waiting to be
  * recalled there, score the attempt and retire the record.
+ *
+ * A hint is never a recall. It fills in the solution, which is normally the
+ * very digit that faded, so counting it would let the hint button farm a
+ * perfect memory record without the player remembering anything.
  */
-function scoreRecall(state: GameState, pos: number, digit: number): GameState {
+function scoreRecall(
+  state: GameState,
+  pos: number,
+  digit: number,
+  fromHint = false,
+): GameState {
   const ph = state.phantoms[pos];
   if (ph === null) return state;
   const phantoms = state.phantoms.slice();
   phantoms[pos] = null;
-  const recalled = digit === ph.value;
+  const recalled = !fromHint && digit === ph.value;
   return {
     ...state,
     phantoms,
@@ -482,7 +491,7 @@ export function reduce(state: GameState, action: Action): GameState {
       notes[p] = 0;
       return afterMove(
         state,
-        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1 }, p, values[p]),
+        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1 }, p, values[p], true),
         p,
         action.now ?? Date.now(),
       );
