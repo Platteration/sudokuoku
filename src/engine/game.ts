@@ -26,6 +26,8 @@ export interface Settings {
   enabledShifts: ShiftKind[];
   /** A shift fires after every N moves (1 = every move). */
   shiftEvery: number;
+  /** How many shifts fire back to back when one is triggered. */
+  shiftsPerMove: number;
   /** Highlight digits that clash with a peer. */
   highlightConflicts: boolean;
   /** Highlight entries that differ from the solution. */
@@ -58,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   difficulty: 'medium',
   enabledShifts: ALL_SHIFT_KINDS.filter((k) => k !== 'relabel'),
   shiftEvery: 1,
+  shiftsPerMove: 1,
   highlightConflicts: true,
   showMistakes: false,
   animateShifts: true,
@@ -382,8 +385,13 @@ function afterMove(
   s = ensurePlayable(s);
   const every = Math.max(1, s.settings.shiftEvery);
   if (moves % every === 0) {
-    const shift = randomShift(shiftRng(s), s.settings.enabledShifts);
-    if (shift) s = applyShift(s, shift);
+    const rng = shiftRng(s);
+    const count = Math.max(1, Math.min(4, s.settings.shiftsPerMove));
+    for (let i = 0; i < count; i++) {
+      const shift = randomShift(rng, s.settings.enabledShifts);
+      if (!shift) break;
+      s = applyShift(s, shift);
+    }
   }
   return s;
 }

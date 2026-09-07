@@ -495,6 +495,7 @@ function pickFreeRules(settings: Settings): Partial<Settings> {
     difficulty: settings.difficulty,
     enabledShifts: settings.enabledShifts,
     shiftEvery: settings.shiftEvery,
+    shiftsPerMove: settings.shiftsPerMove,
     phantomMode: settings.phantomMode,
     phantomTarget: settings.phantomTarget,
     phantomEvery: settings.phantomEvery,

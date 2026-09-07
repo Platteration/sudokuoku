@@ -72,6 +72,7 @@ export function dailySettings(base: Settings, config: DailyConfig): Settings {
     difficulty: config.difficulty,
     enabledShifts: ALL_SHIFT_KINDS.filter((k) => k !== 'relabel'),
     shiftEvery: 1,
+    shiftsPerMove: 1,
     phantomMode: config.phantom,
     phantomTarget: 'both',
     phantomEvery: 3,

@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   ALL_SHIFT_KINDS,
   Difficulty,
+  PRESETS,
   PhantomTarget,
   SHIFT_KIND_LABEL,
   Settings,
   ShiftKind,
   ThemePreference,
+  matchingPreset,
 } from '../engine';
 import { Colors, THEME_PACKS, radius, useStyles, useTheme } from '../theme';
 import PrimaryButton from './PrimaryButton';
@@ -26,6 +28,7 @@ interface Props {
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
 const SHIFT_EVERY = [1, 2, 3, 5];
+const SHIFTS_PER_MOVE = [1, 2, 3];
 const PHANTOM_EVERY = [2, 3, 5, 8];
 const PHANTOM_LOCK = [3, 5, 8, 12];
 const PHANTOM_MAX = [1, 2, 3, 5];
@@ -87,6 +90,7 @@ function Row({ label, hint, value, onChange }: { label: string; hint?: string; v
 export default function SettingsSheet({ visible, settings, daily, onClose, onChange, onNewGame, onHelp }: Props) {
   const styles = useStyles(makeStyles);
   const [difficulty, setDifficulty] = useState<Difficulty>(settings.difficulty);
+  const active_preset = matchingPreset(settings)?.id ?? null;
 
   const toggleKind = (kind: ShiftKind, on: boolean) => {
     const set = new Set(settings.enabledShifts);
@@ -128,6 +132,31 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         </View>
       ) : null}
 
+      <Text style={styles.section}>Presets</Text>
+      <Text style={styles.sectionHint}>
+        A preset sets the rules only. Your appearance and assistance choices stay as they are.
+      </Text>
+      <View style={styles.presets}>
+        {PRESETS.map((preset) => {
+          const active = active_preset === preset.id;
+          return (
+            <Pressable
+              key={preset.id}
+              onPress={() => onChange(preset.rules)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              style={[styles.preset, active && styles.presetActive]}
+            >
+              <Text style={styles.presetIcon}>{preset.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.presetName, active && styles.presetNameActive]}>{preset.name}</Text>
+                <Text style={styles.presetDesc}>{preset.description}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <Text style={styles.section}>Difficulty for the next free game</Text>
       <Segmented
         options={DIFFICULTIES}
@@ -138,6 +167,14 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
 
       {daily ? null : (
         <>
+      <Text style={styles.section}>Shifts per move</Text>
+      <Segmented
+        options={SHIFTS_PER_MOVE}
+        value={settings.shiftsPerMove}
+        onChange={(n) => onChange({ shiftsPerMove: n })}
+        label={(n) => (n === 1 ? 'One' : `${n} in a row`)}
+      />
+
       <Text style={styles.section}>Shift after every … moves</Text>
       <Segmented
         options={SHIFT_EVERY}
@@ -293,6 +330,41 @@ const makeStyles = (colors: Colors) =>
     letterSpacing: 0.6,
     marginTop: 18,
     marginBottom: 8,
+  },
+  presets: {
+    marginTop: 2,
+  },
+  preset: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
+  },
+  presetActive: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+    backgroundColor: colors.primarySoft,
+  },
+  presetIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  presetName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  presetNameActive: {
+    color: colors.primary,
+  },
+  presetDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
   },
   packs: {
     flexDirection: 'row',
