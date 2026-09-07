@@ -45,12 +45,12 @@ export default function Board({ state, size, onSelect }: Props) {
   const lastFlashed = useRef(state.shiftCount);
   const movedTo = useMemo(() => {
     const set = new Set<number>();
-    if (!lastShift) return set;
+    if (!lastShift || settings.reduceMotion) return set;
     lastShift.dest.forEach((to, from) => {
       if (to !== from) set.add(to);
     });
     return set;
-  }, [lastShift]);
+  }, [lastShift, settings.reduceMotion]);
   useEffect(() => {
     if (state.shiftCount === lastFlashed.current) return;
     lastFlashed.current = state.shiftCount;
@@ -115,7 +115,7 @@ export default function Board({ state, size, onSelect }: Props) {
     tokens.forEach((token, pos) => {
       const target = { x: colOf(pos) * cell, y: rowOf(pos) * cell };
       const v = positions.current![token];
-      if (tokensChanged && settings.animateShifts && !sizeChanged) {
+      if (tokensChanged && settings.animateShifts && !settings.reduceMotion && !sizeChanged) {
         anims.push(
           Animated.timing(v, {
             toValue: target,
@@ -131,7 +131,7 @@ export default function Board({ state, size, onSelect }: Props) {
     prevCell.current = cell;
     prevTokens.current = tokens;
     if (anims.length) Animated.parallel(anims).start();
-  }, [tokens, cell, settings.animateShifts]);
+  }, [tokens, cell, settings.animateShifts, settings.reduceMotion]);
 
   const conflicts = useMemo(
     () => (settings.highlightConflicts ? findConflicts(values) : new Set<number>()),

@@ -34,6 +34,10 @@ export interface Settings {
   animateShifts: boolean;
   /** Light or dark appearance, or follow the system. */
   theme: ThemePreference;
+  /** Colour pack id, see THEME_PACKS. */
+  themePack: string;
+  /** Skip the slide, flash and pop animations. */
+  reduceMotion: boolean;
   /** Phantom challenge: filled cells fade away and lock for a while. */
   phantomMode: boolean;
   /** Which filled cells may fade. */
@@ -58,6 +62,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showMistakes: false,
   animateShifts: true,
   theme: 'system',
+  themePack: 'classic',
+  reduceMotion: false,
   phantomMode: false,
   phantomTarget: 'both',
   phantomEvery: 3,

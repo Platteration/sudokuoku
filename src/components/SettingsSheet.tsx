@@ -9,7 +9,7 @@ import {
   ShiftKind,
   ThemePreference,
 } from '../engine';
-import { Colors, radius, useStyles, useTheme } from '../theme';
+import { Colors, THEME_PACKS, radius, useStyles, useTheme } from '../theme';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
 
@@ -225,6 +225,41 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         onChange={(t) => onChange({ theme: t })}
         label={(t) => t[0].toUpperCase() + t.slice(1)}
       />
+      <Text style={styles.subsection}>Colour pack</Text>
+      <View style={styles.packs}>
+        {THEME_PACKS.map((pack) => {
+          const active = pack.id === settings.themePack;
+          const swatch = settings.theme === 'dark' ? pack.dark : pack.light;
+          return (
+            <Pressable
+              key={pack.id}
+              onPress={() => onChange({ themePack: pack.id })}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              style={[styles.pack, active && styles.packActive]}
+            >
+              <View style={styles.swatchRow}>
+                {[swatch.background, swatch.surface, swatch.primary, swatch.accent, swatch.phantom].map(
+                  (c, i) => (
+                    <View key={i} style={[styles.swatch, { backgroundColor: c }]} />
+                  ),
+                )}
+              </View>
+              <Text style={[styles.packName, active && styles.packNameActive]}>{pack.name}</Text>
+              <Text style={styles.packDesc} numberOfLines={2}>
+                {pack.description}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={{ height: 8 }} />
+      <Row
+        label="Reduce motion"
+        hint="Cells jump straight to their new places, with no sliding, flashing or popping."
+        value={settings.reduceMotion}
+        onChange={(v) => onChange({ reduceMotion: v })}
+      />
 
       <Text style={styles.section}>Assistance</Text>
       <Row
@@ -258,6 +293,40 @@ const makeStyles = (colors: Colors) =>
     letterSpacing: 0.6,
     marginTop: 18,
     marginBottom: 8,
+  },
+  packs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -3,
+  },
+  pack: {
+    width: '50%',
+    padding: 3,
+  },
+  packActive: {},
+  swatchRow: {
+    flexDirection: 'row',
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.line,
+    height: 28,
+  },
+  swatch: {
+    flex: 1,
+  },
+  packName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+    marginTop: 4,
+  },
+  packNameActive: {
+    color: colors.primary,
+  },
+  packDesc: {
+    fontSize: 11,
+    color: colors.textMuted,
   },
   dailyNote: {
     marginTop: 12,

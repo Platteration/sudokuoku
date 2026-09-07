@@ -73,6 +73,8 @@ const SHARED_SETTING_KEYS: (keyof Settings)[] = [
   'showMistakes',
   'animateShifts',
   'theme',
+  'themePack',
+  'reduceMotion',
   'phantomMarkers',
   'phantomFadeMs',
 ];
@@ -153,7 +155,7 @@ function Loading() {
 function Game({ initial }: { initial: Loaded }) {
   const [state, dispatch] = useReducer(reduce, initial.free);
   return (
-    <ThemeProvider preference={state.settings.theme}>
+    <ThemeProvider preference={state.settings.theme} pack={state.settings.themePack}>
       <GameView state={state} dispatch={dispatch} initial={initial} />
     </ThemeProvider>
   );
@@ -378,7 +380,12 @@ function GameView({
         <Stat label="Left" value={String(state.values.filter((v) => v === 0).length)} />
       </View>
 
-      <ShiftBanner shift={state.lastShift} shiftCount={state.shiftCount} moves={state.moves} />
+      <ShiftBanner
+        shift={state.lastShift}
+        shiftCount={state.shiftCount}
+        moves={state.moves}
+        reduceMotion={state.settings.reduceMotion}
+      />
 
       {state.settings.phantomMode ? (
         <View style={styles.phantomLine}>

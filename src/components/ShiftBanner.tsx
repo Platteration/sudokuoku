@@ -7,6 +7,7 @@ interface Props {
   shift: ShiftEvent | null;
   shiftCount: number;
   moves: number;
+  reduceMotion?: boolean;
 }
 
 const ICONS: Record<ShiftKind, string> = {
@@ -21,7 +22,7 @@ const ICONS: Record<ShiftKind, string> = {
 };
 
 /** Announces the most recent shift and pops each time a new one lands. */
-export default function ShiftBanner({ shift, shiftCount, moves }: Props) {
+export default function ShiftBanner({ shift, shiftCount, moves, reduceMotion }: Props) {
   const styles = useStyles(makeStyles);
   const scale = useRef(new Animated.Value(1)).current;
   const lastCount = useRef(shiftCount);
@@ -29,6 +30,10 @@ export default function ShiftBanner({ shift, shiftCount, moves }: Props) {
   useEffect(() => {
     if (shiftCount === lastCount.current) return;
     lastCount.current = shiftCount;
+    if (reduceMotion) {
+      scale.setValue(1);
+      return;
+    }
     scale.setValue(0.92);
     Animated.spring(scale, {
       toValue: 1,
@@ -36,7 +41,7 @@ export default function ShiftBanner({ shift, shiftCount, moves }: Props) {
       tension: 120,
       useNativeDriver: true,
     }).start();
-  }, [shiftCount, scale]);
+  }, [shiftCount, scale, reduceMotion]);
 
   const text = shift
     ? shift.description
