@@ -2,6 +2,17 @@
 
 Two independent reviewers read every first-party file in this repository; a third then re-read each security or bug claim against the code and tried to refute it. Only claims that survived that check are listed as findings; the ones that did not are recorded at the end so they are not re-raised.
 
+## Status — what has been fixed
+
+These findings are now fixed on `claude/repo-review-security-baiyud`, each with a regression test:
+
+- **BUG-1**
+- **MISS-1**
+
+The rest of this document is the review as written, and the fixed items are left in place so the reasoning behind each change stays with it.
+
+Repository hardening applied here as well: every GitHub Action is pinned to a commit rather than a floating tag, each workflow declares a least-privilege `permissions` block, and a Dependabot config, a licence and a security policy are in place.
+
 ## Summary
 
 Sudokuoku is a single-screen Expo SDK 57 / React Native 0.86 / React 19.2 Sudoku variant (~7,100 lines of TypeScript) whose board is permuted by a Sudoku symmetry after every move, with an optional 'phantom' memory mode, a seeded daily challenge, streaks with freezes, XP, badges, six colour packs and deliberate screen-reader support. The engine (generator, solver, transforms, reducer, progression) is pure, well commented and covered by seven vitest suites; the UI is a thin reducer-driven layer over it. It is a feature-complete pre-release (v1.0.0, fourteen commits over two days): the platform is current (new architecture, no deprecated expo modules), but the LICENSE is still Expo's template, EAS is not linked to a project, there is no scheme, lint, Dependabot or component test, and the web export has three no-op Alert paths. Headline fixes: set userInterfaceStyle to automatic (the System theme cannot go dark on device today), finish store readiness, add ESLint/Prettier/Dependabot and a hardened CI, stop the one-second timer tick from re-rendering the ~250-view board, slim the 200-snapshot history that is serialised on every move, and consolidate the rule defaults that are currently defined in three modules.
