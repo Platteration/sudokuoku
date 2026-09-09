@@ -126,6 +126,16 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         </View>
       ) : null}
 
+      <Text style={styles.section}>Difficulty for the next free game</Text>
+      <Segmented
+        options={DIFFICULTIES}
+        value={difficulty}
+        onChange={setDifficulty}
+        label={(d) => d[0].toUpperCase() + d.slice(1)}
+      />
+
+      {daily ? null : (
+        <>
       <Text style={styles.section}>Presets</Text>
       <Text style={styles.sectionHint}>
         A preset sets the rules only. Your appearance and assistance choices stay as they are.
@@ -160,16 +170,6 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         })}
       </View>
 
-      <Text style={styles.section}>Difficulty for the next free game</Text>
-      <Segmented
-        options={DIFFICULTIES}
-        value={difficulty}
-        onChange={setDifficulty}
-        label={(d) => d[0].toUpperCase() + d.slice(1)}
-      />
-
-      {daily ? null : (
-        <>
       <Text style={styles.section}>Shifts per move</Text>
       <Segmented
         options={SHIFTS_PER_MOVE}

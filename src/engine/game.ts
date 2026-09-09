@@ -16,6 +16,7 @@ import {
   permute,
   randomShift,
 } from './transforms';
+import { RULE_KEYS } from './presets';
 
 export type PhantomTarget = 'entries' | 'givens' | 'both';
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -409,6 +410,13 @@ function afterMove(
   return s;
 }
 
+/** A settings patch with every rule the daily fixes stripped out. */
+function withoutRules(patch: Partial<Settings>): Partial<Settings> {
+  const out = { ...patch };
+  for (const key of RULE_KEYS) delete out[key];
+  return out;
+}
+
 export function reduce(state: GameState, action: Action): GameState {
   switch (action.type) {
     case 'select':
@@ -423,8 +431,13 @@ export function reduce(state: GameState, action: Action): GameState {
     case 'load':
       return action.state;
 
-    case 'updateSettings':
-      return { ...state, settings: { ...state.settings, ...action.settings } };
+    case 'updateSettings': {
+      // The daily is the same puzzle under the same rules for everyone, so a
+      // daily in progress ignores the rule keys. Appearance and assistance are
+      // the player's own and still apply.
+      const patch = state.mode === 'daily' ? withoutRules(action.settings) : action.settings;
+      return { ...state, settings: { ...state.settings, ...patch } };
+    }
 
     case 'newGame':
       return newGame({ ...state.settings, ...action.settings }, action.seed);

@@ -12,6 +12,7 @@ import {
   rowOf,
 } from '../engine';
 import { Colors, useStyles, useTheme } from '../theme';
+import { cellContent } from '../utils/cellContent';
 import { describeCell } from '../utils/describe';
 
 interface Props {
@@ -39,7 +40,7 @@ export default function Board({ state, size, onSelect }: Props) {
   const { colors } = useTheme();
   const styles = useStyles(makeStyles);
   const cell = size / 9;
-  const { tokens, values, given, notes, selected, settings, phantoms, moves, lastShift } = state;
+  const { tokens, values, given, selected, settings, phantoms, moves, lastShift } = state;
 
   // Cells that just received a moved digit flash briefly after each shift.
   const flash = useRef(new Animated.Value(0)).current;
@@ -242,11 +243,8 @@ export default function Board({ state, size, onSelect }: Props) {
       {/* Moving, token-based layer. */}
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         {tokens.map((token, pos) => {
-          const value = values[pos];
-          const note = notes[pos];
+          const { phantom, marker, value, notes: note } = cellContent(state, pos);
           const v = positions.current![token];
-          const phantom = phantoms[pos];
-          const locked = phantom !== null && moves < phantom.unlockAtMove;
           const fade = phantom ? fadeFor(phantom) : null;
           return (
             <Animated.View
@@ -260,8 +258,11 @@ export default function Board({ state, size, onSelect }: Props) {
                 },
               ]}
             >
+              {/* The faded digit and its marker sit above the cell rather than
+                  instead of it: once the lock runs out the record lingers to
+                  score the recall, and the cell is playable again meanwhile. */}
               {phantom && fade ? (
-                <>
+                <View style={styles.phantomLayer}>
                   <Animated.Text
                     style={[
                       styles.digit,
@@ -276,7 +277,7 @@ export default function Board({ state, size, onSelect }: Props) {
                   >
                     {phantom.value}
                   </Animated.Text>
-                  {settings.phantomMarkers && locked ? (
+                  {marker ? (
                     <Animated.View
                       style={[
                         styles.marker,
@@ -289,8 +290,9 @@ export default function Board({ state, size, onSelect }: Props) {
                       </Text>
                     </Animated.View>
                   ) : null}
-                </>
-              ) : value !== 0 ? (
+                </View>
+              ) : null}
+              {value !== 0 ? (
                 <Text
                   style={[
                     styles.digit,
@@ -362,6 +364,15 @@ const makeStyles = (colors: Colors) =>
   },
   digit: {
     fontVariant: ['tabular-nums'],
+  },
+  phantomLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   phantomDigit: {
     position: 'absolute',

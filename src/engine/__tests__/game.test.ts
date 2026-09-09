@@ -4,12 +4,15 @@ import {
   DEFAULT_SETTINGS,
   GameState,
   applyShift,
+  isLocked,
   mistakes,
   newGame,
   nextShift,
   reduce,
   remainingCounts,
 } from '../game';
+import { PRESETS, RULE_KEYS } from '../presets';
+import { dailyConfig, dailySeed, dailySettings } from '../progress';
 import { CELLS, isComplete } from '../sudoku';
 import { rotateShift } from '../transforms';
 
@@ -222,5 +225,45 @@ describe('shift preview', () => {
     const p = s.values.findIndex((v) => v === 0);
     const noted = run(s, { type: 'select', pos: p }, { type: 'toggleNotesMode' }, { type: 'input', digit: 5 });
     expect(nextShift(noted)!.description).toBe(before!.description);
+  });
+});
+
+describe('updateSettings', () => {
+  const zen = PRESETS.find((p) => p.id === 'zen')!;
+  const dailyKey = '2026-09-09'; // a Wednesday: medium, phantom day
+  const startDaily = (): GameState =>
+    newGame(dailySettings(DEFAULT_SETTINGS, dailyConfig(dailyKey)), dailySeed(dailyKey), {
+      mode: 'daily',
+      dailyKey,
+    });
+
+  it('applies a preset in free play', () => {
+    const s = newGame({ ...DEFAULT_SETTINGS, phantomMode: true }, 40);
+    const after = reduce(s, { type: 'updateSettings', settings: zen.rules });
+    expect(after.settings.enabledShifts).toEqual([]);
+    expect(after.settings.phantomMode).toBe(false);
+  });
+
+  it('ignores rule changes during a daily but keeps appearance and assistance', () => {
+    const s = startDaily();
+    const after = reduce(s, {
+      type: 'updateSettings',
+      settings: { ...zen.rules, theme: 'dark', highlightConflicts: false, shiftPreview: 'exact' },
+    });
+    for (const key of RULE_KEYS) expect(after.settings[key]).toEqual(s.settings[key]);
+    expect(after.settings.theme).toBe('dark');
+    expect(after.settings.highlightConflicts).toBe(false);
+    expect(after.settings.shiftPreview).toBe('exact');
+  });
+
+  it('keeps the daily shifting and fading after a preset tap', () => {
+    let s = reduce(startDaily(), { type: 'updateSettings', settings: zen.rules });
+    expect(s.settings.phantomMode).toBe(true);
+    for (let i = 0; i < 6; i++) {
+      const q = s.values.findIndex((v, idx) => v === 0 && !isLocked(s, idx));
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+    }
+    expect(s.shiftCount).toBeGreaterThan(0);
+    expect(s.phantomCount).toBeGreaterThan(0);
   });
 });
