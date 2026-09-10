@@ -94,6 +94,40 @@ export function isDailyStale(
   return game.mode === 'daily' && game.dailyKey !== todayKey;
 }
 
+/** The parts of a game the daily card and its button read. */
+interface DailyView {
+  mode: GameMode;
+  dailyKey: string | null;
+  status: 'playing' | 'won';
+}
+
+/**
+ * True when the game on screen really is today's daily. Mode alone does not
+ * answer that: a daily left on screen across midnight is yesterday's puzzle,
+ * so the daily button would offer to go "back to the board" for a board that
+ * tapping it destroys.
+ */
+export function isTodaysDaily(
+  game: { mode: GameMode; dailyKey: string | null },
+  todayKey: string,
+): boolean {
+  return game.mode === 'daily' && !isDailyStale(game, todayKey);
+}
+
+/**
+ * True when today's daily has been started and not finished, whichever of the
+ * two games holds it. Yesterday's daily does not count: it is not today's
+ * puzzle, and switching to the daily replaces it rather than resuming it.
+ */
+export function todaysDailyInProgress(
+  onScreen: DailyView,
+  parked: DailyView | null,
+  todayKey: string,
+): boolean {
+  const daily = isTodaysDaily(onScreen, todayKey) ? onScreen : parked;
+  return !!daily && daily.dailyKey === todayKey && daily.status === 'playing';
+}
+
 export interface DailyResult {
   key: string;
   difficulty: Difficulty;

@@ -40,6 +40,7 @@ import {
   emptyProfile,
   isDailyStale,
   isLocked,
+  isTodaysDaily,
   newGame,
   nextShifts,
   profileStreak,
@@ -49,6 +50,7 @@ import {
   reduce,
   remainingCounts,
   shareText,
+  todaysDailyInProgress,
 } from '../engine';
 import {
   clearDailyGame,
@@ -192,10 +194,12 @@ function GameView({
   const todayKey = dateKey(new Date());
   const config = dailyConfig(todayKey);
   const isDaily = state.mode === 'daily';
+  // Mode alone does not say whether the board on screen is *today's* daily:
+  // the app can sit open across local midnight. Everything the daily card and
+  // its button say has to be answered for today, not for the mode.
+  const onTodaysDaily = isTodaysDaily(state, todayKey);
   const dailyDone = !!profile.daily[todayKey];
-  const dailyInProgress = isDaily
-    ? state.status === 'playing'
-    : parked.current !== null && parked.current.dailyKey === todayKey && parked.current.status === 'playing';
+  const dailyInProgress = todaysDailyInProgress(state, parked.current, todayKey);
 
   const updateProfile = useCallback((next: Profile) => {
     setProfile(next);
@@ -409,7 +413,7 @@ function GameView({
             name="daily"
             label="Daily challenge"
             badge={!dailyDone}
-            active={isDaily}
+            active={onTodaysDaily}
             onPress={() => setShowDaily(true)}
           />
           <IconButton name="progress" label="Progress" onPress={() => setShowProgress(true)} />
@@ -500,7 +504,7 @@ function GameView({
         config={config}
         profile={profile}
         inProgress={dailyInProgress}
-        active={isDaily}
+        active={onTodaysDaily}
         onClose={() => setShowDaily(false)}
         onPlay={() => switchTo('daily')}
         onShare={(text) => shareMessage(text)}

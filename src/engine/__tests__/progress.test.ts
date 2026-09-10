@@ -7,6 +7,7 @@ import {
   MAX_FREEZES,
   isCleanWin,
   isDailyStale,
+  isTodaysDaily,
   applyStreakFreeze,
   currentStreak,
   grantMonthlyFreeze,
@@ -24,6 +25,7 @@ import {
   recordGameWin,
   shareText,
   shiftDateKey,
+  todaysDailyInProgress,
   xpForLevel,
   xpForWin,
 } from '../progress';
@@ -215,6 +217,32 @@ describe('a daily that has outlived its day', () => {
 
   it('never calls a free game stale', () => {
     expect(isDailyStale(newGame(DEFAULT_SETTINGS, 1), '2026-09-06')).toBe(false);
+  });
+
+  it('is not today\u2019s daily, however it got on screen', () => {
+    expect(isTodaysDaily(daily('2026-09-06'), '2026-09-06')).toBe(true);
+    expect(isTodaysDaily(daily('2026-09-05'), '2026-09-06')).toBe(false);
+    expect(isTodaysDaily(newGame(DEFAULT_SETTINGS, 1), '2026-09-06')).toBe(false);
+  });
+
+  it('does not count as today\u2019s daily being in progress', () => {
+    // Left on screen across midnight, with the free game parked behind it:
+    // today's puzzle has never been started, so the card must not say it is
+    // under way and the button must not offer to go back to it.
+    const free = newGame(DEFAULT_SETTINGS, 2);
+    expect(todaysDailyInProgress(daily('2026-09-05'), free, '2026-09-06')).toBe(false);
+    // Today's daily counts wherever it is: on screen, or parked behind free play.
+    expect(todaysDailyInProgress(daily('2026-09-06'), free, '2026-09-06')).toBe(true);
+    expect(todaysDailyInProgress(free, daily('2026-09-06'), '2026-09-06')).toBe(true);
+    // A stale one parked behind free play is no more today's than an absent one.
+    expect(todaysDailyInProgress(free, daily('2026-09-05'), '2026-09-06')).toBe(false);
+    expect(todaysDailyInProgress(free, null, '2026-09-06')).toBe(false);
+  });
+
+  it('does not count a finished daily as in progress', () => {
+    const done: GameState = { ...daily('2026-09-06'), status: 'won' };
+    expect(todaysDailyInProgress(done, null, '2026-09-06')).toBe(false);
+    expect(todaysDailyInProgress(newGame(DEFAULT_SETTINGS, 2), done, '2026-09-06')).toBe(false);
   });
 });
 
