@@ -15,7 +15,7 @@ interface Props {
 }
 
 /** The round icon button used across the header and sheet corners. */
-export default function IconButton({ name, label, onPress, badge, active, size = 40 }: Props) {
+export default function IconButton({ name, label, onPress, badge, active, size = 36 }: Props) {
   const styles = useStyles(makeStyles);
   const { colors, dark } = useTheme();
   return (
@@ -46,7 +46,7 @@ const makeStyles = (colors: Colors) =>
       borderColor: colors.line,
       alignItems: 'center',
       justifyContent: 'center',
-      marginLeft: 8,
+      marginLeft: 5,
     },
     badge: {
       position: 'absolute',

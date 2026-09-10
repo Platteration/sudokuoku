@@ -3,6 +3,7 @@
     "name": "Sudokuoku",
     "slug": "sudokuoku",
     "version": "1.0.0",
+    "scheme": "sudokuoku",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

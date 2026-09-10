@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
@@ -21,15 +22,21 @@ import Controls from '../components/Controls';
 import DailySheet from '../components/DailySheet';
 import HelpSheet from '../components/HelpSheet';
 import NumberPad from '../components/NumberPad';
+import ChallengeSheet from '../components/ChallengeSheet';
 import ProgressSheet from '../components/ProgressSheet';
 import SettingsSheet from '../components/SettingsSheet';
 import ShiftBanner from '../components/ShiftBanner';
 import WinSheet from '../components/WinSheet';
 import {
   Action,
+  Challenge,
   DEFAULT_SETTINGS,
   Difficulty,
+  GameMode,
   GameState,
+  decodeChallenge,
+  encodeChallenge,
+  startChallenge,
   Profile,
   Settings,
   WinOutcome,
@@ -50,13 +57,18 @@ import {
   shareText,
 } from '../engine';
 import {
+  clearChallengeGame,
   clearDailyGame,
   clearProfile,
   hasSeenHelp,
+  loadChallengeCode,
+  loadChallengeGame,
   loadDailyGame,
   loadGame,
   loadProfile,
   markHelpSeen,
+  saveChallengeCode,
+  saveChallengeGame,
   saveDailyGame,
   saveGame,
   saveProfile,
@@ -68,6 +80,8 @@ import { formatTime } from '../utils/time';
 interface Loaded {
   free: GameState;
   daily: GameState | null;
+  challenge: GameState | null;
+  challengeInfo: Challenge | null;
   profile: Profile;
   firstLaunch: boolean;
 }
@@ -107,8 +121,15 @@ export default function GameScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadGame(), loadDailyGame(), loadProfile(), hasSeenHelp()]).then(
-      ([savedFree, savedDaily, loadedProfile, seenHelp]) => {
+    Promise.all([
+      loadGame(),
+      loadDailyGame(),
+      loadProfile(),
+      hasSeenHelp(),
+      loadChallengeGame(),
+      loadChallengeCode(),
+    ]).then(
+      ([savedFree, savedDaily, loadedProfile, seenHelp, savedChallenge, challengeCode]) => {
         if (cancelled) return;
         // Grant the monthly freeze and spend one if a missed day can be saved.
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
@@ -130,7 +151,18 @@ export default function GameScreen() {
         } else if (savedDaily) {
           clearDailyGame();
         }
-        setLoaded({ free, daily, profile, firstLaunch: !seenHelp });
+        // An unfinished challenge is resumed, along with the code it came
+        // from so the opponent's ghost is still there.
+        let challenge: GameState | null = null;
+        let challengeInfo: Challenge | null = null;
+        if (savedChallenge && savedChallenge.status === 'playing') {
+          challenge = savedChallenge;
+          const decoded = challengeCode ? decodeChallenge(challengeCode) : null;
+          if (decoded && decoded.ok) challengeInfo = decoded.challenge;
+        } else if (savedChallenge) {
+          clearChallengeGame();
+        }
+        setLoaded({ free, daily, challenge, challengeInfo, profile, firstLaunch: !seenHelp });
       },
     );
     return () => {
@@ -190,17 +222,24 @@ function GameView({
   const [showWin, setShowWin] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [showDaily, setShowDaily] = useState(false);
+  const [showChallenge, setShowChallenge] = useState(false);
 
-  /** The game that is not on screen (daily while free is shown, and vice versa). */
-  const parked = useRef<GameState | null>(initial.daily);
+  /** The games that are not on screen, one slot per mode. */
+  const parked = useRef<Partial<Record<GameMode, GameState>>>({
+    daily: initial.daily ?? undefined,
+    challenge: initial.challenge ?? undefined,
+  });
+  const [challengeInfo, setChallengeInfo] = useState<Challenge | null>(initial.challengeInfo);
 
   const todayKey = dateKey(new Date());
   const config = dailyConfig(todayKey);
   const isDaily = state.mode === 'daily';
+  const isChallenge = state.mode === 'challenge';
   const dailyDone = !!profile.daily[todayKey];
+  const parkedDaily = parked.current.daily;
   const dailyInProgress = isDaily
     ? state.status === 'playing'
-    : parked.current !== null && parked.current.dailyKey === todayKey && parked.current.status === 'playing';
+    : !!parkedDaily && parkedDaily.dailyKey === todayKey && parkedDaily.status === 'playing';
 
   const updateProfile = useCallback((next: Profile) => {
     setProfile(next);
@@ -229,8 +268,12 @@ function GameView({
 
   // Persist on every board change, and every 10 seconds for the timer.
   const persist = useCallback((s: GameState) => {
+    // Only free play is worth saving once finished; a daily or a challenge is
+    // a single attempt, so a completed one is cleared rather than stored.
     if (s.mode === 'daily') {
       if (s.status === 'playing') saveDailyGame(s);
+    } else if (s.mode === 'challenge') {
+      if (s.status === 'playing') saveChallengeGame(s);
     } else {
       saveGame(s);
     }
@@ -286,77 +329,113 @@ function GameView({
     setOutcome(result);
     setShowWin(true);
     if (state.mode === 'daily') clearDailyGame();
+    if (state.mode === 'challenge') clearChallengeGame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status, state.seed]);
 
   const send = useCallback((action: Action) => dispatch(action), [dispatch]);
 
-  /** Swaps the on-screen game with the parked one, creating a daily if needed. */
-  const switchTo = useCallback(
-    (mode: 'free' | 'daily'): void => {
-      if (state.mode === mode) return;
-      let next = parked.current;
-      // Park the current game (a finished daily is not worth keeping).
-      if (state.mode === 'daily' && state.status !== 'playing') {
-        parked.current = null;
-        clearDailyGame();
-      } else {
-        persist(state);
-        parked.current = state;
+  /**
+   * Stores the on-screen game so it can be returned to. A finished daily or
+   * challenge is discarded instead: neither can be replayed.
+   */
+  const park = useCallback(
+    (s: GameState) => {
+      if (s.mode !== 'free' && s.status !== 'playing') {
+        delete parked.current[s.mode];
+        if (s.mode === 'daily') clearDailyGame();
+        else clearChallengeGame();
+        return;
       }
-      const shared = pickShared(state.settings);
-      if (mode === 'daily') {
-        if (!next || next.dailyKey !== todayKey) {
-          const settings = dailySettings({ ...state.settings, ...shared }, config);
-          next = newGame(settings, dailySeed(todayKey), { mode: 'daily', dailyKey: todayKey });
-          updateProfile(recordGameStart(profile, settings.difficulty));
-        } else {
-          next = { ...next, settings: { ...next.settings, ...shared } };
-        }
-      } else {
-        if (!next) {
-          next = newGame({ ...state.settings, ...shared, ...pickFreeRules(initial.free.settings) });
-          updateProfile(recordGameStart(profile, next.settings.difficulty));
-        } else {
-          next = { ...next, settings: { ...next.settings, ...shared } };
-        }
-      }
+      persist(s);
+      parked.current[s.mode] = s;
+    },
+    [persist],
+  );
+
+  /** Puts a game on screen, clearing anything left over from the last one. */
+  const show = useCallback(
+    (next: GameState) => {
       wonSeed.current = next.status === 'won' ? next.seed : null;
       setShowWin(false);
       setOutcome(null);
       dispatch({ type: 'load', state: next });
     },
-    [state, todayKey, config, profile, persist, updateProfile, dispatch, initial.free.settings],
+    [dispatch],
   );
 
+  /** Swaps the on-screen game for the one parked under `mode`. */
+  const switchTo = useCallback(
+    (mode: GameMode): void => {
+      if (state.mode === mode) return;
+      const waiting = parked.current[mode];
+      park(state);
+      const shared = pickShared(state.settings);
+
+      if (waiting && !(mode === 'daily' && waiting.dailyKey !== todayKey)) {
+        show({ ...waiting, settings: { ...waiting.settings, ...shared } });
+        return;
+      }
+
+      if (mode === 'daily') {
+        const settings = dailySettings({ ...state.settings, ...shared }, config);
+        const next = newGame(settings, dailySeed(todayKey), { mode: 'daily', dailyKey: todayKey });
+        updateProfile(recordGameStart(profile, settings.difficulty));
+        show(next);
+        return;
+      }
+      if (mode === 'free') {
+        const next = newGame({
+          ...state.settings,
+          ...shared,
+          ...pickFreeRules(initial.free.settings),
+        });
+        updateProfile(recordGameStart(profile, next.settings.difficulty));
+        show(next);
+      }
+      // 'challenge' with nothing parked has nothing to show; the sheet is the
+      // only way in, and it always supplies a challenge.
+    },
+    [state, todayKey, config, profile, park, show, updateProfile, initial.free.settings],
+  );
+
+  /** Starts the board a challenge code describes. */
+  const openChallenge = useCallback(
+    (challenge: Challenge) => {
+      park(state);
+      const settings = { ...state.settings, ...pickShared(state.settings) };
+      const next = startChallenge(settings, challenge);
+      setChallengeInfo(challenge);
+      saveChallengeCode(encodeChallenge(challenge));
+      updateProfile(recordGameStart(profile, next.settings.difficulty));
+      show(next);
+    },
+    [state, profile, park, show, updateProfile],
+  );
+
+  /** Always starts a fresh *free* game, parking whatever was on screen. */
   const startNewGame = useCallback(
     (difficulty?: Difficulty) => {
-      const base = state.mode === 'daily' ? parked.current?.settings ?? initial.free.settings : state.settings;
+      const base =
+        state.mode === 'free'
+          ? state.settings
+          : parked.current.free?.settings ?? initial.free.settings;
       const settings: Settings = {
         ...base,
         ...pickShared(state.settings),
         difficulty: difficulty ?? base.difficulty,
       };
-      if (state.mode === 'daily') {
-        if (state.status !== 'playing') clearDailyGame();
-        else {
-          persist(state);
-        }
-        parked.current = state.status === 'playing' ? state : null;
-      }
+      if (state.mode !== 'free') park(state);
       const next = newGame(settings);
-      wonSeed.current = null;
-      setShowWin(false);
-      setOutcome(null);
       updateProfile(recordGameStart(profile, settings.difficulty));
-      dispatch({ type: 'load', state: next });
+      show(next);
     },
-    [state, profile, persist, updateProfile, dispatch, initial.free.settings],
+    [state, profile, park, show, updateProfile, initial.free.settings],
   );
 
   const confirmNewGame = () => {
-    const freeGame = state.mode === 'free' ? state : parked.current;
-    const inProgress = freeGame && freeGame.mode === 'free' && freeGame.status === 'playing' && freeGame.moves > 0;
+    const freeGame = state.mode === 'free' ? state : parked.current.free;
+    const inProgress = freeGame && freeGame.status === 'playing' && freeGame.moves > 0;
     if (!inProgress) {
       startNewGame();
       return;
@@ -378,6 +457,36 @@ function GameView({
     markHelpSeen();
   };
 
+  // A tapped challenge link, whether it cold-started the app or arrived while
+  // it was already open. The code is the last path segment of either
+  // sudokuoku://c/<code> or https://<host>/c/<code>.
+  const openChallengeRef = useRef(openChallenge);
+  openChallengeRef.current = openChallenge;
+  useEffect(() => {
+    let cancelled = false;
+
+    const handle = (url: string | null) => {
+      if (!url || cancelled) return;
+      const marker = '/c/';
+      const at = url.indexOf(marker);
+      if (at < 0) return;
+      const code = url.slice(at + marker.length).split(/[?#]/)[0];
+      const result = decodeChallenge(code);
+      if (result.ok) {
+        openChallengeRef.current(result.challenge);
+      } else {
+        Alert.alert('That challenge could not be opened', result.error);
+      }
+    };
+
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener('url', (event) => handle(event.url));
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, []);
+
   const playing = state.status === 'playing';
   const remaining = remainingCounts(state);
   const selectedLocked = state.selected !== null && isLocked(state, state.selected);
@@ -391,10 +500,16 @@ function GameView({
     <View style={[styles.screen, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
       <StatusBar style={dark ? 'light' : 'dark'} />
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Sudokuoku</Text>
+        <View style={styles.headerText}>
+          <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            Sudokuoku
+          </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {isDaily ? `Daily · ${config.label}` : `${difficultyLabel} · shifting board`}
+            {isDaily
+              ? `Daily · ${config.label}`
+              : isChallenge
+                ? `Challenge · ${difficultyLabel}`
+                : `${difficultyLabel} · shifting board`}
           </Text>
         </View>
         <View style={styles.headerButtons}>
@@ -404,6 +519,12 @@ function GameView({
             badge={!dailyDone}
             active={isDaily}
             onPress={() => setShowDaily(true)}
+          />
+          <IconButton
+            name="share"
+            label="Challenge a friend"
+            active={isChallenge}
+            onPress={() => setShowChallenge(true)}
           />
           <IconButton name="progress" label="Progress" onPress={() => setShowProgress(true)} />
           <IconButton name="settings" label="Settings" onPress={() => setShowSettings(true)} />
@@ -498,6 +619,14 @@ function GameView({
         onPlay={() => switchTo('daily')}
         onShare={(text) => shareMessage(text)}
       />
+      <ChallengeSheet
+        visible={showChallenge}
+        state={state}
+        active={isChallenge ? challengeInfo : null}
+        onClose={() => setShowChallenge(false)}
+        onPlay={openChallenge}
+        onShare={shareMessage}
+      />
       <ProgressSheet
         visible={showProgress}
         profile={profile}
@@ -524,6 +653,8 @@ function GameView({
         onClose={() => setShowWin(false)}
         onNewGame={() => startNewGame()}
         onShare={isDaily ? shareDaily : undefined}
+        onChallenge={isDaily ? undefined : () => setShowChallenge(true)}
+        ghost={isChallenge ? challengeInfo?.ghost ?? null : null}
       />
     </View>
   );
@@ -595,8 +726,14 @@ const makeStyles = (colors: Colors) =>
       fontSize: 13,
       color: colors.textMuted,
     },
+    headerText: {
+      flex: 1,
+      minWidth: 96,
+      marginRight: 4,
+    },
     headerButtons: {
       flexDirection: 'row',
+      flexShrink: 0,
     },
     statsRow: {
       flexDirection: 'row',

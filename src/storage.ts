@@ -3,6 +3,8 @@ import { CELLS, DEFAULT_SETTINGS, GameState, Profile, normalizeProfile } from '.
 
 const FREE_GAME_KEY = 'sudokuoku:game:v1';
 const DAILY_GAME_KEY = 'sudokuoku:daily:v1';
+const CHALLENGE_GAME_KEY = 'sudokuoku:challenge:v1';
+const CHALLENGE_CODE_KEY = 'sudokuoku:challengeCode:v1';
 const PROFILE_KEY = 'sudokuoku:profile:v1';
 const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
 const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
@@ -26,7 +28,7 @@ function normalize(state: GameState, legacyElapsed?: number): GameState {
   return {
     ...state,
     settings: { ...DEFAULT_SETTINGS, ...state.settings },
-    mode: state.mode === 'daily' ? 'daily' : 'free',
+    mode: state.mode === 'daily' || state.mode === 'challenge' ? state.mode : 'free',
     dailyKey: typeof state.dailyKey === 'string' ? state.dailyKey : null,
     elapsed:
       typeof state.elapsed === 'number'
@@ -42,6 +44,7 @@ function normalize(state: GameState, legacyElapsed?: number): GameState {
     phantomCount: typeof state.phantomCount === 'number' ? state.phantomCount : 0,
     phantomsRecalled: typeof state.phantomsRecalled === 'number' ? state.phantomsRecalled : 0,
     phantomsMissed: typeof state.phantomsMissed === 'number' ? state.phantomsMissed : 0,
+    log: Array.isArray(state.log) ? state.log : [],
     history: Array.isArray(state.history) ? state.history : [],
   };
 }
@@ -72,6 +75,36 @@ export const loadGame = () => loadState(FREE_GAME_KEY);
 export const saveGame = (state: GameState) => saveState(FREE_GAME_KEY, state);
 export const loadDailyGame = () => loadState(DAILY_GAME_KEY);
 export const saveDailyGame = (state: GameState) => saveState(DAILY_GAME_KEY, state);
+export const loadChallengeGame = () => loadState(CHALLENGE_GAME_KEY);
+export const saveChallengeGame = (state: GameState) => saveState(CHALLENGE_GAME_KEY, state);
+
+export async function clearChallengeGame(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([CHALLENGE_GAME_KEY, CHALLENGE_CODE_KEY]);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * The code a challenge in progress came from, kept beside the board so the
+ * opponent's ghost survives an app restart.
+ */
+export async function saveChallengeCode(code: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CHALLENGE_CODE_KEY, code);
+  } catch {
+    // best-effort
+  }
+}
+
+export async function loadChallengeCode(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(CHALLENGE_CODE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 export async function clearDailyGame(): Promise<void> {
   try {

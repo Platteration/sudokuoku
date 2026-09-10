@@ -28,6 +28,7 @@ export const ICONS = {
   lock: 'lock-closed',
   ghost: 'ellipse-outline',
   chevron: 'chevron-forward',
+  copy: 'copy-outline',
   // Preset marks
   zen: 'leaf-outline',
   dice: 'grid-outline',

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { GameState, WinOutcome, levelInfo } from '../engine';
+import { GameState, GhostRun, WinOutcome, levelInfo } from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
@@ -14,6 +14,10 @@ interface Props {
   onClose: () => void;
   onNewGame: () => void;
   onShare?: () => void;
+  /** Opens the challenge sheet, pre-loaded with this board. */
+  onChallenge?: () => void;
+  /** The opponent's recorded solve, when this win was a challenge. */
+  ghost?: GhostRun | null;
 }
 
 function Stat({ label, value, styles }: { label: string; value: string; styles: ReturnType<typeof makeStyles> }) {
@@ -25,10 +29,20 @@ function Stat({ label, value, styles }: { label: string; value: string; styles: 
   );
 }
 
-export default function WinSheet({ visible, state, outcome, onClose, onNewGame, onShare }: Props) {
+export default function WinSheet({
+  visible,
+  state,
+  outcome,
+  onClose,
+  onNewGame,
+  onShare,
+  onChallenge,
+  ghost,
+}: Props) {
   const styles = useStyles(makeStyles);
   const { width } = useWindowDimensions();
   const daily = state.mode === 'daily';
+  const beatThem = !!ghost && state.elapsed < ghost.totalSeconds;
   const level = outcome ? levelInfo(outcome.profile.xp) : null;
   return (
     <Sheet
@@ -46,6 +60,15 @@ export default function WinSheet({ visible, state, outcome, onClose, onNewGame, 
             variant={daily ? 'secondary' : 'primary'}
             onPress={onNewGame}
           />
+          {onChallenge ? (
+            <PrimaryButton
+              label="Challenge a friend with this board"
+              icon="share"
+              variant="secondary"
+              size="md"
+              onPress={onChallenge}
+            />
+          ) : null}
           <PrimaryButton label="Admire the board" variant="ghost" size="md" onPress={onClose} />
         </>
       }
@@ -71,6 +94,17 @@ export default function WinSheet({ visible, state, outcome, onClose, onNewGame, 
         <View style={[styles.stats, { marginTop: 6 }]}>
           <Stat label="Phantoms" value={String(state.phantomCount)} styles={styles} />
           <Stat label="Recalled" value={`${state.phantomsRecalled}/${state.phantomsRecalled + state.phantomsMissed}`} styles={styles} />
+        </View>
+      ) : null}
+
+      {ghost ? (
+        <View style={[styles.race, beatThem ? styles.raceWon : styles.raceLost]}>
+          <Text style={styles.raceTitle}>
+            {beatThem ? 'You beat their time' : 'They were faster'}
+          </Text>
+          <Text style={styles.raceText}>
+            You {formatTime(state.elapsed)} · them {formatTime(ghost.totalSeconds)}
+          </Text>
         </View>
       ) : null}
 
@@ -136,6 +170,29 @@ const makeStyles = (colors: Colors) =>
       fontSize: 12,
       color: colors.textMuted,
       marginTop: 2,
+    },
+    race: {
+      marginTop: 12,
+      borderRadius: radius.md,
+      padding: 12,
+      alignItems: 'center',
+    },
+    raceWon: {
+      backgroundColor: colors.successSoft,
+    },
+    raceLost: {
+      backgroundColor: colors.dangerSoft,
+    },
+    raceTitle: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: colors.text,
+    },
+    raceText: {
+      fontSize: 13,
+      color: colors.textMuted,
+      marginTop: 2,
+      fontVariant: ['tabular-nums'],
     },
     xpCard: {
       marginTop: 12,

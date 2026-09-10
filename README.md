@@ -23,6 +23,34 @@ Store builds use [EAS Build](https://docs.expo.dev/build/introduction/):
 `npx eas build --platform ios` / `--platform android`. Bundle identifiers are
 set in `app.json`.
 
+## Challenge a friend
+
+Any board can be handed to someone else as a short code or a link. There is no
+server involved: the whole challenge travels inside the string.
+
+This works because the game is deterministic in a particular way. The puzzle is
+`generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
+move *N* comes from `createRng(seed ^ (N * 0x9e3779b1))` — it depends only on
+the seed and the move index, never on which cell was filled. So two people on
+the same seed meet the same grid **and the same run of shifts**, however
+differently they play.
+
+A finished game can also carry your solve as a **ghost**, so the recipient
+races your pace and the win screen says who was quicker. Moves are recorded by
+*token* rather than position — a token is a cell's stable identity across every
+shift — which is what lets a replay survive the board moving underneath it.
+
+Payloads are bit-packed and base64url encoded, so a full 47-move solve is about
+170 characters. Each carries an engine revision: if puzzle generation or the
+RNG ever changes, old links refuse to open rather than quietly serving a
+different board, and a checksum catches a mangled paste.
+
+Two deliberate limits. Challenges always disable the phantom challenge, because
+phantom placement depends on the player's own progress and would drift between
+the two sides. And results are computed on each device, so a friend's time is
+friendly bragging, not an official score — which is why there are no global
+leaderboards.
+
 ## Accessibility
 
 Because the board rearranges under the player, position alone is not enough to
@@ -180,6 +208,7 @@ src/engine/transforms.ts    the shift kinds and how they permute the board
 src/engine/game.ts          game state + reducer (moves, shifts, phantoms, undo, hints, win)
 src/engine/progress.ts      daily challenge, streaks, freezes, XP, levels and badges
 src/engine/presets.ts       named rule sets (Zen, Classic, Phantom, Blindfold, Chaos)
+src/engine/challenge.ts     shareable boards: encode, decode, ghost replay
 src/engine/__tests__/       vitest suites for all of the above
 src/components/Board.tsx    two-layer board; cells animate to their new spots
 src/components/ui/          shared button layer: Press, Icon, IconButton, Segmented
