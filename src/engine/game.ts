@@ -109,6 +109,22 @@ export interface ShiftEvent extends Shift {
   afterMove: number;
 }
 
+/**
+ * One board-changing move, recorded so a solve can be replayed or shared.
+ *
+ * The cell is identified by its *token* rather than its position, because
+ * positions are meaningless across a shift: token 40 is the same cell for the
+ * whole game, wherever the board has carried it.
+ */
+export interface MoveRecord {
+  /** Stable cell identity, 0..80. See GameState.tokens. */
+  token: number;
+  /** 1-9 to place a digit, 0 to erase. */
+  digit: number;
+  /** Seconds played when the move was made. */
+  seconds: number;
+}
+
 interface Snapshot {
   solution: Grid;
   given: boolean[];
@@ -127,9 +143,11 @@ interface Snapshot {
   phantomsRecalled: number;
   /** Phantom cells refilled with a different digit. */
   phantomsMissed: number;
+  /** Every board-changing move so far, oldest first. */
+  log: MoveRecord[];
 }
 
-export type GameMode = 'free' | 'daily';
+export type GameMode = 'free' | 'daily' | 'challenge';
 
 export interface GameState extends Snapshot {
   seed: number;
@@ -195,6 +213,7 @@ export function newGame(
     phantomCount: 0,
     phantomsRecalled: 0,
     phantomsMissed: 0,
+    log: [],
     notesMode: false,
     status: 'playing',
     history: [],
@@ -219,7 +238,13 @@ function snapshot(s: GameState): Snapshot {
     phantomCount: s.phantomCount,
     phantomsRecalled: s.phantomsRecalled,
     phantomsMissed: s.phantomsMissed,
+    log: s.log,
   };
+}
+
+/** Appends a move to the replay log. */
+function logMove(state: GameState, pos: number, digit: number): MoveRecord[] {
+  return [...state.log, { token: state.tokens[pos], digit, seconds: state.elapsed }];
 }
 
 /** Per-game RNG for shifts, advanced by move count so shifts are reproducible. */
@@ -460,7 +485,7 @@ export function reduce(state: GameState, action: Action): GameState {
       notes[p] = 0;
       return afterMove(
         state,
-        scoreRecall({ ...state, values, notes }, p, d),
+        scoreRecall({ ...state, values, notes, log: logMove(state, p, d) }, p, d),
         p,
         action.now ?? Date.now(),
       );
@@ -477,7 +502,12 @@ export function reduce(state: GameState, action: Action): GameState {
       values[p] = 0;
       notes[p] = 0;
       if (!wasValue) return { ...state, notes, version: state.version + 1 };
-      return afterMove(state, { ...state, values, notes }, p, action.now ?? Date.now());
+      return afterMove(
+        state,
+        { ...state, values, notes, log: logMove(state, p, 0) },
+        p,
+        action.now ?? Date.now(),
+      );
     }
 
     case 'hint': {
@@ -491,7 +521,18 @@ export function reduce(state: GameState, action: Action): GameState {
       notes[p] = 0;
       return afterMove(
         state,
-        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1 }, p, values[p], true),
+        scoreRecall(
+          {
+            ...state,
+            values,
+            notes,
+            hintsUsed: state.hintsUsed + 1,
+            log: logMove(state, p, values[p]),
+          },
+          p,
+          values[p],
+          true,
+        ),
         p,
         action.now ?? Date.now(),
       );
