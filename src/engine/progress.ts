@@ -2,7 +2,7 @@
  * Daily challenge, streaks, XP, levels and badges. Pure functions over a
  * persisted Profile so everything here is testable without the UI.
  */
-import { GameState, Settings } from './game';
+import { GameMode, GameState, Settings } from './game';
 import { Difficulty } from './sudoku';
 import { ALL_SHIFT_KINDS } from './transforms';
 
@@ -81,6 +81,19 @@ export function dailySettings(base: Settings, config: DailyConfig): Settings {
   };
 }
 
+/**
+ * True when a daily game belongs to a day that has already passed. The app
+ * can sit open across local midnight, so "is this the daily?" is never just a
+ * question about the game's mode: yesterday's puzzle is finished business and
+ * today's has to be built.
+ */
+export function isDailyStale(
+  game: { mode: GameMode; dailyKey: string | null },
+  todayKey: string,
+): boolean {
+  return game.mode === 'daily' && game.dailyKey !== todayKey;
+}
+
 export interface DailyResult {
   key: string;
   difficulty: Difficulty;
@@ -121,6 +134,15 @@ export function currentStreak(
     key = shiftDateKey(key, -1);
   }
   return n;
+}
+
+/**
+ * The streak to show for a profile: the same number everywhere, freezes
+ * included. Call this rather than `currentStreak` directly, or one screen
+ * ends up reporting a run that another screen says was broken.
+ */
+export function profileStreak(profile: Profile, todayKey: string): number {
+  return currentStreak(profile.daily, todayKey, profile.frozenDays);
 }
 
 /** Calendar month of a date key, e.g. "2026-09". */

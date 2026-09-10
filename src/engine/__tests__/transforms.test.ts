@@ -9,6 +9,7 @@ import {
   bandRowsShift,
   bandsShift,
   boxSlideShift,
+  joinDescriptions,
   mirrorShift,
   permute,
   randomShift,
@@ -153,5 +154,22 @@ describe('permute', () => {
     const ids = Array.from({ length: CELLS }, (_, i) => i);
     const moved = permute(ids, s);
     for (let p = 0; p < CELLS; p++) expect(moved[s.dest[p]]).toBe(p);
+  });
+});
+
+describe('describing a move', () => {
+  it('reads several shifts of one move as one sentence', () => {
+    // A move may fire up to four shifts; the banner and the screen reader get
+    // one line, so it has to name all of them in the order they happened.
+    expect(
+      joinDescriptions([rotateShift(1).description, bandRowsShift(1, 1).description]),
+    ).toBe('Board rotated clockwise, then rows 4–6 slid down 1');
+  });
+
+  it('leaves a single shift exactly as it was written', () => {
+    expect(joinDescriptions([mirrorShift('diagonal').description])).toBe(
+      mirrorShift('diagonal').description,
+    );
+    expect(joinDescriptions([])).toBe('');
   });
 });

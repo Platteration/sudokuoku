@@ -8,6 +8,7 @@ import {
   ShiftEvent,
   ShiftKind,
   ShiftPreview,
+  joinDescriptions,
 } from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 
@@ -16,8 +17,8 @@ interface Props {
   shiftCount: number;
   moves: number;
   reduceMotion?: boolean;
-  /** The shift the next move will trigger, if any. */
-  next?: Shift | null;
+  /** Every shift the next move will trigger, in order. */
+  next?: readonly Shift[];
   preview?: ShiftPreview;
 }
 
@@ -38,7 +39,7 @@ export default function ShiftBanner({
   shiftCount,
   moves,
   reduceMotion,
-  next,
+  next = [],
   preview = 'off',
 }: Props) {
   const styles = useStyles(makeStyles);
@@ -67,15 +68,21 @@ export default function ShiftBanner({
       ? 'Make a move. Something will shift.'
       : 'The board held still.';
 
+  // A move can fire several shifts, so the preview names all of them: telling
+  // the player about the first of two is worse than telling them nothing.
   const showPreview = preview !== 'off';
-  const category = next ? SHIFT_CATEGORY[next.kind] : null;
+  const category = next.length > 0 ? SHIFT_CATEGORY[next[0].kind] : null;
   const previewText = !showPreview
     ? null
-    : !next
+    : next.length === 0
       ? 'Nothing moves after your next move'
       : preview === 'exact'
-        ? next.description
-        : CATEGORY_LABEL[SHIFT_CATEGORY[next.kind]];
+        ? joinDescriptions(next.map((sh) => sh.description))
+        : joinDescriptions(
+            next
+              .map((sh) => CATEGORY_LABEL[SHIFT_CATEGORY[sh.kind]])
+              .filter((label, i, all) => i === 0 || label !== all[i - 1]),
+          );
 
   return (
     <Animated.View style={[styles.banner, { transform: [{ scale }] }]}>
@@ -95,7 +102,7 @@ export default function ShiftBanner({
       {previewText ? (
         <View style={styles.preview}>
           <Text style={styles.previewIcon}>{category ? CATEGORY_ICON[category] : '·'}</Text>
-          <Text style={styles.previewText} numberOfLines={1}>
+          <Text style={styles.previewText} numberOfLines={2}>
             Next: {previewText}
           </Text>
         </View>

@@ -13,6 +13,7 @@ import {
   ShiftKind,
   applyToGrid,
   applyToNotes,
+  joinDescriptions,
   permute,
   randomShift,
 } from './transforms';
@@ -105,6 +106,12 @@ export interface Phantom {
   unlocked?: boolean;
 }
 
+/**
+ * The shift a move applied. When a move fires several shifts at once
+ * (`shiftsPerMove`), this is the last one applied and its `description` names
+ * every shift of that move in order, so the banner and the screen reader
+ * report the whole move rather than only its final step.
+ */
 export interface ShiftEvent extends Shift {
   /** Move number after which the shift fired. */
   afterMove: number;
@@ -221,11 +228,6 @@ function snapshot(s: GameState): Snapshot {
     phantomsRecalled: s.phantomsRecalled,
     phantomsMissed: s.phantomsMissed,
   };
-}
-
-/** Per-game RNG for shifts, advanced by move count so shifts are reproducible. */
-function shiftRng(state: GameState) {
-  return createRng((state.seed ^ (state.moves * 0x9e3779b1)) >>> 0);
 }
 
 /** Separate stream for phantom picks so they never correlate with shifts. */
@@ -397,17 +399,36 @@ function afterMove(
     if (moves % cadence === 0) s = spawnPhantom(s, changed, now);
   }
   s = ensurePlayable(s);
-  const every = Math.max(1, s.settings.shiftEvery);
-  if (moves % every === 0) {
-    const rng = shiftRng(s);
-    const count = Math.max(1, Math.min(4, s.settings.shiftsPerMove));
-    for (let i = 0; i < count; i++) {
-      const shift = randomShift(rng, s.settings.enabledShifts);
-      if (!shift) break;
-      s = applyShift(s, shift);
-    }
+  const fired = shiftsFor(s, moves);
+  for (const shift of fired) s = applyShift(s, shift);
+  // One move, one report: the event keeps the last shift's permutation but
+  // describes every shift the move fired.
+  if (fired.length > 1 && s.lastShift) {
+    s = {
+      ...s,
+      lastShift: { ...s.lastShift, description: joinDescriptions(fired.map((f) => f.description)) },
+    };
   }
   return s;
+}
+
+/**
+ * The shifts a move fires, drawn in order from the per-game stream keyed on
+ * that move number so they stay reproducible. `afterMove` performs them and
+ * `nextShifts` previews them, so both read the very same draws.
+ */
+function shiftsFor(state: GameState, moves: number): Shift[] {
+  const every = Math.max(1, state.settings.shiftEvery);
+  if (moves % every !== 0) return [];
+  const rng = createRng((state.seed ^ (moves * 0x9e3779b1)) >>> 0);
+  const count = Math.max(1, Math.min(4, state.settings.shiftsPerMove));
+  const out: Shift[] = [];
+  for (let i = 0; i < count; i++) {
+    const shift = randomShift(rng, state.settings.enabledShifts);
+    if (!shift) break;
+    out.push(shift);
+  }
+  return out;
 }
 
 /** A settings patch with every rule the daily fixes stripped out. */
@@ -513,19 +534,16 @@ export function reduce(state: GameState, action: Action): GameState {
 }
 
 /**
- * The shift that will fire after the next move, or null when the next move
- * does not trigger one. This reads the very same seeded stream `afterMove`
- * will use, so the preview is exact rather than a guess. A move that
- * completes the puzzle ends the game before any shift, which no preview can
- * know in advance.
+ * Every shift the next move will fire, in order, or an empty list when the
+ * next move triggers none. This reads the very same seeded stream `afterMove`
+ * will use, so the preview is exact rather than a guess — and it is the whole
+ * move, not just its first shift, which is what a `shiftsPerMove` of 2 or more
+ * actually applies. A move that completes the puzzle ends the game before any
+ * shift, which no preview can know in advance.
  */
-export function nextShift(state: GameState): Shift | null {
-  if (state.status !== 'playing') return null;
-  const moves = state.moves + 1;
-  const every = Math.max(1, state.settings.shiftEvery);
-  if (moves % every !== 0) return null;
-  const rng = createRng((state.seed ^ (moves * 0x9e3779b1)) >>> 0);
-  return randomShift(rng, state.settings.enabledShifts);
+export function nextShifts(state: GameState): Shift[] {
+  if (state.status !== 'playing') return [];
+  return shiftsFor(state, state.moves + 1);
 }
 
 /** Positions that are filled but differ from the solution. */

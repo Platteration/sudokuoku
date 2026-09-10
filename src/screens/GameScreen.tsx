@@ -33,15 +33,16 @@ import {
   Profile,
   Settings,
   WinOutcome,
-  currentStreak,
   dailyConfig,
   dailySeed,
   dailySettings,
   dateKey,
   emptyProfile,
+  isDailyStale,
   isLocked,
   newGame,
-  nextShift,
+  nextShifts,
+  profileStreak,
   recordGameStart,
   recordGameWin,
   refreshStreak,
@@ -56,13 +57,16 @@ import {
   loadDailyGame,
   loadGame,
   loadProfile,
+  loadSharedSettings,
   markHelpSeen,
   saveDailyGame,
   saveGame,
   saveProfile,
+  saveSharedSettings,
 } from '../storage';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
 import { describeShift } from '../utils/describe';
+import { applyShared, pickShared } from '../utils/saved';
 import { formatTime } from '../utils/time';
 
 interface Loaded {
@@ -70,25 +74,6 @@ interface Loaded {
   daily: GameState | null;
   profile: Profile;
   firstLaunch: boolean;
-}
-
-/** Settings that follow the player across free and daily games. */
-const SHARED_SETTING_KEYS: (keyof Settings)[] = [
-  'highlightConflicts',
-  'showMistakes',
-  'animateShifts',
-  'theme',
-  'themePack',
-  'shiftPreview',
-  'reduceMotion',
-  'phantomMarkers',
-  'phantomFadeMs',
-];
-
-function pickShared(settings: Settings): Partial<Settings> {
-  const out: Partial<Settings> = {};
-  for (const k of SHARED_SETTING_KEYS) (out as Record<string, unknown>)[k] = settings[k];
-  return out;
 }
 
 function haptic(kind: 'shift' | 'win' | 'tap') {
@@ -107,8 +92,14 @@ export default function GameScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadGame(), loadDailyGame(), loadProfile(), hasSeenHelp()]).then(
-      ([savedFree, savedDaily, loadedProfile, seenHelp]) => {
+    Promise.all([
+      loadGame(),
+      loadDailyGame(),
+      loadProfile(),
+      hasSeenHelp(),
+      loadSharedSettings(),
+    ]).then(
+      ([savedFree, savedDaily, loadedProfile, seenHelp, shared]) => {
         if (cancelled) return;
         // Grant the monthly freeze and spend one if a missed day can be saved.
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
@@ -125,11 +116,15 @@ export default function GameScreen() {
         // A daily from another day, or one already finished, is discarded.
         const today = dateKey(new Date());
         let daily: GameState | null = null;
-        if (savedDaily && savedDaily.dailyKey === today && savedDaily.status === 'playing') {
+        if (savedDaily && !isDailyStale(savedDaily, today) && savedDaily.status === 'playing') {
           daily = savedDaily;
         } else if (savedDaily) {
           clearDailyGame();
         }
+        // Appearance and assistance are the player's, not the game's: they
+        // are stored on their own and overlaid on whichever game is restored.
+        free = { ...free, settings: applyShared(free.settings, shared) };
+        if (daily) daily = { ...daily, settings: applyShared(daily.settings, shared) };
         setLoaded({ free, daily, profile, firstLaunch: !seenHelp });
       },
     );
@@ -243,6 +238,11 @@ function GameView({
     if (state.elapsed > 0 && state.elapsed % 10 === 0) persist(state);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.elapsed]);
+  // The shared settings are kept outside both games, so a change made while
+  // the daily is on screen still survives a restart and a switch.
+  useEffect(() => {
+    saveSharedSettings(pickShared(state.settings));
+  }, [state.settings]);
 
   // Feedback when a shift lands. The board rearranging is invisible to a
   // screen reader, so it is spoken as well as felt.
@@ -294,11 +294,15 @@ function GameView({
   /** Swaps the on-screen game with the parked one, creating a daily if needed. */
   const switchTo = useCallback(
     (mode: 'free' | 'daily'): void => {
-      if (state.mode === mode) return;
+      // Midnight can pass with the app open, and then "play today's daily"
+      // while yesterday's is on screen is a real switch, not a no-op.
+      const stale = isDailyStale(state, todayKey);
+      if (state.mode === mode && !stale) return;
       let next = parked.current;
-      // Park the current game (a finished daily is not worth keeping).
-      if (state.mode === 'daily' && state.status !== 'playing') {
-        parked.current = null;
+      // Park the current game. A finished daily, and one whose day has gone,
+      // are not worth keeping; the other game stays parked either way.
+      if (state.mode === 'daily' && (state.status !== 'playing' || stale)) {
+        if (mode !== 'daily') parked.current = null;
         clearDailyGame();
       } else {
         persist(state);
@@ -361,16 +365,19 @@ function GameView({
       startNewGame();
       return;
     }
-    Alert.alert('Start a new free game?', 'Your current free game will be lost.', [
-      { text: 'Keep playing', style: 'cancel' },
-      { text: 'New game', style: 'destructive', onPress: () => startNewGame() },
-    ]);
+    confirmAction({
+      title: 'Start a new free game?',
+      message: 'Your current free game will be lost.',
+      cancelLabel: 'Keep playing',
+      confirmLabel: 'New game',
+      onConfirm: () => startNewGame(),
+    });
   };
 
   const shareDaily = async () => {
     const result = profile.daily[todayKey];
     if (!result) return;
-    await shareMessage(shareText(result, currentStreak(profile.daily, todayKey, profile.frozenDays)));
+    await shareMessage(shareText(result, profileStreak(profile, todayKey)));
   };
 
   const closeHelp = () => {
@@ -423,7 +430,7 @@ function GameView({
         shiftCount={state.shiftCount}
         moves={state.moves}
         reduceMotion={state.settings.reduceMotion}
-        next={state.settings.shiftPreview === 'off' ? null : nextShift(state)}
+        next={state.settings.shiftPreview === 'off' ? [] : nextShifts(state)}
         preview={state.settings.shiftPreview}
       />
 
@@ -504,17 +511,17 @@ function GameView({
         todayKey={todayKey}
         onClose={() => setShowProgress(false)}
         onReset={() => {
-          Alert.alert('Reset progress?', 'Statistics, XP, badges and daily history will be erased. This cannot be undone.', [
-            { text: 'Keep', style: 'cancel' },
-            {
-              text: 'Reset',
-              style: 'destructive',
-              onPress: () => {
-                clearProfile();
-                setProfile(emptyProfile());
-              },
+          confirmAction({
+            title: 'Reset progress?',
+            message:
+              'Statistics, XP, badges and daily history will be erased. This cannot be undone.',
+            cancelLabel: 'Keep',
+            confirmLabel: 'Reset',
+            onConfirm: () => {
+              clearProfile();
+              setProfile(emptyProfile());
             },
-          ]);
+          });
         }}
       />
       <WinSheet
@@ -544,10 +551,44 @@ function pickFreeRules(settings: Settings): Partial<Settings> {
   };
 }
 
+/**
+ * react-native-web implements Alert as an empty stub, so a confirmation there
+ * does nothing at all and the button it guards looks broken. The browser's own
+ * dialog stands in on that platform.
+ */
+function confirmAction({
+  title,
+  message,
+  cancelLabel,
+  confirmLabel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+}): void {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) onConfirm();
+    return;
+  }
+  Alert.alert(title, message, [
+    { text: cancelLabel, style: 'cancel' },
+    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+  ]);
+}
+
 async function shareMessage(message: string): Promise<void> {
   try {
     await Share.share({ message });
   } catch {
+    // Sharing rejects in every browser without navigator.share, which is where
+    // the Alert fallback would be a no-op as well.
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') window.alert(message);
+      return;
+    }
     Alert.alert('Your result', message);
   }
 }

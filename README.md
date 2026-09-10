@@ -167,8 +167,9 @@ so the movement can be watched rather than read about. It is driven by the
 real transforms, so it shows exactly what the game does.
 
 Undo rewinds the shift together with the move. Everything is saved locally:
-the free game, the daily in progress, and the profile with statistics, XP,
-badges, streak freezes and daily history.
+the free game, the daily in progress, the profile with statistics, XP, badges,
+streak freezes and daily history, and the appearance and assistance
+preferences, which belong to the player rather than to either game.
 
 ## Code layout
 

@@ -6,6 +6,7 @@ import {
   DailyResult,
   MAX_FREEZES,
   isCleanWin,
+  isDailyStale,
   applyStreakFreeze,
   currentStreak,
   grantMonthlyFreeze,
@@ -18,6 +19,7 @@ import {
   levelInfo,
   normalizeProfile,
   parseDateKey,
+  profileStreak,
   recordGameStart,
   recordGameWin,
   shareText,
@@ -200,6 +202,22 @@ describe('game timer and load', () => {
   });
 });
 
+describe('a daily that has outlived its day', () => {
+  const daily = (key: string | null): GameState =>
+    newGame(DEFAULT_SETTINGS, 1, { mode: 'daily', dailyKey: key });
+
+  it('is stale once the calendar day has moved on', () => {
+    // The app can sit open across midnight, so this is not a hypothetical.
+    expect(isDailyStale(daily('2026-09-06'), '2026-09-06')).toBe(false);
+    expect(isDailyStale(daily('2026-09-05'), '2026-09-06')).toBe(true);
+    expect(isDailyStale(daily(null), '2026-09-06')).toBe(true);
+  });
+
+  it('never calls a free game stale', () => {
+    expect(isDailyStale(newGame(DEFAULT_SETTINGS, 1), '2026-09-06')).toBe(false);
+  });
+});
+
 describe('streak freezes', () => {
   const day = (key: string): DailyResult => ({
     key, difficulty: 'easy', phantom: false, elapsed: 1, moves: 1, shifts: 0, hints: 0,
@@ -262,6 +280,21 @@ describe('streak freezes', () => {
     expect(after.freezes).toBe(0); // granted one, spent it
     expect(after.frozenDays['2026-09-05']).toBe(true);
     expect(currentStreak(after.daily, '2026-09-06', after.frozenDays)).toBe(3);
+  });
+
+  it('profileStreak counts the days a freeze rescued', () => {
+    // Played the 3rd and 4th, missed the 5th, the freeze covered it.
+    const rescued = refreshStreak(
+      withDays(['2026-09-03', '2026-09-04'], { freezes: 1 }),
+      '2026-09-06',
+    );
+    expect(rescued.frozenDays['2026-09-05']).toBe(true);
+    // Every screen has to agree with the one that spent the freeze, so the
+    // profile-wide helper is what they all call.
+    expect(profileStreak(rescued, '2026-09-06')).toBe(3);
+    expect(profileStreak(rescued, '2026-09-06')).toBe(
+      currentStreak(rescued.daily, '2026-09-06', rescued.frozenDays),
+    );
   });
 
   it('normalizes a profile saved before freezes existed', () => {

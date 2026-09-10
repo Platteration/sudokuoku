@@ -7,14 +7,14 @@ import {
   isLocked,
   mistakes,
   newGame,
-  nextShift,
+  nextShifts,
   reduce,
   remainingCounts,
 } from '../game';
 import { PRESETS, RULE_KEYS } from '../presets';
 import { dailyConfig, dailySeed, dailySettings } from '../progress';
 import { CELLS, isComplete } from '../sudoku';
-import { rotateShift } from '../transforms';
+import { joinDescriptions, permute, rotateShift } from '../transforms';
 
 const run = (state: GameState, ...actions: Action[]) =>
   actions.reduce(reduce, state);
@@ -191,40 +191,70 @@ describe('shift preview', () => {
   it('predicts exactly the shift the next move will apply', () => {
     let s = newGame(DEFAULT_SETTINGS, 31);
     for (let i = 0; i < 12; i++) {
-      const predicted = nextShift(s);
+      const predicted = nextShifts(s);
+      expect(predicted).toHaveLength(1);
       const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
       const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
-      expect(after.lastShift!.kind).toBe(predicted!.kind);
-      expect(after.lastShift!.description).toBe(predicted!.description);
-      expect(after.lastShift!.dest).toEqual(predicted!.dest);
+      expect(after.lastShift!.kind).toBe(predicted[0].kind);
+      expect(after.lastShift!.description).toBe(predicted[0].description);
+      expect(after.lastShift!.dest).toEqual(predicted[0].dest);
       s = after;
     }
   });
 
-  it('is null when the next move does not trigger a shift', () => {
+  it('predicts every shift of a move that fires several', () => {
+    let s = newGame({ ...DEFAULT_SETTINGS, shiftsPerMove: 3 }, 35);
+    for (let i = 0; i < 8; i++) {
+      const predicted = nextShifts(s);
+      expect(predicted).toHaveLength(3);
+      const before = s.shiftCount;
+      const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
+      const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+      // All three fired, in the order predicted: permuting the cells by hand
+      // with the predicted shifts lands the board exactly where the move did.
+      expect(after.shiftCount).toBe(before + 3);
+      expect(after.tokens).toEqual(predicted.reduce((t, shift) => permute(t, shift), s.tokens));
+      s = after;
+    }
+  });
+
+  it('describes the whole move, not just its last shift', () => {
+    const s = newGame({ ...DEFAULT_SETTINGS, shiftsPerMove: 2 }, 36);
+    const predicted = nextShifts(s);
+    expect(predicted).toHaveLength(2);
+    const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
+    const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+    // The banner and the screen reader read this one string.
+    const said = after.lastShift!.description;
+    expect(said).toContain(predicted[0].description);
+    expect(said.toLowerCase()).toContain(predicted[1].description.toLowerCase());
+    expect(said).toBe(joinDescriptions(predicted.map((p) => p.description)));
+  });
+
+  it('is empty when the next move does not trigger a shift', () => {
     const s = newGame({ ...DEFAULT_SETTINGS, shiftEvery: 3 }, 32);
-    expect(nextShift(s)).toBeNull(); // move 1 of 3
+    expect(nextShifts(s)).toEqual([]); // move 1 of 3
     const p = s.values.findIndex((v) => v === 0);
     const s1 = run(s, { type: 'select', pos: p }, { type: 'input', digit: 1 });
-    expect(nextShift(s1)).toBeNull(); // move 2 of 3
+    expect(nextShifts(s1)).toEqual([]); // move 2 of 3
     const q = s1.values.findIndex((v) => v === 0);
     const s2 = run(s1, { type: 'select', pos: q }, { type: 'input', digit: 1 });
-    expect(nextShift(s2)).not.toBeNull(); // move 3 triggers
+    expect(nextShifts(s2)).toHaveLength(1); // move 3 triggers
     expect(s2.shiftCount).toBe(0);
   });
 
-  it('is null with no shifts enabled or once the game is over', () => {
-    expect(nextShift(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 33))).toBeNull();
+  it('is empty with no shifts enabled or once the game is over', () => {
+    expect(nextShifts(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 33))).toEqual([]);
     const won = { ...newGame(DEFAULT_SETTINGS, 33), status: 'won' as const };
-    expect(nextShift(won)).toBeNull();
+    expect(nextShifts(won)).toEqual([]);
   });
 
   it('does not change when the player only takes notes', () => {
     const s = newGame(DEFAULT_SETTINGS, 34);
-    const before = nextShift(s);
+    const before = nextShifts(s);
     const p = s.values.findIndex((v) => v === 0);
     const noted = run(s, { type: 'select', pos: p }, { type: 'toggleNotesMode' }, { type: 'input', digit: 5 });
-    expect(nextShift(noted)!.description).toBe(before!.description);
+    expect(nextShifts(noted)[0].description).toBe(before[0].description);
   });
 });
 

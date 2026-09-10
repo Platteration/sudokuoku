@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   DailyConfig,
   Profile,
-  currentStreak,
+  profileStreak,
   shareText,
   shiftDateKey,
   parseDateKey,
@@ -41,7 +41,7 @@ function untilMidnight(): string {
 export default function DailySheet(p: Props) {
   const styles = useStyles(makeStyles);
   const result = p.profile.daily[p.todayKey];
-  const streak = currentStreak(p.profile.daily, p.todayKey, p.profile.frozenDays);
+  const streak = profileStreak(p.profile, p.todayKey);
   const week = Array.from({ length: 7 }, (_, i) => shiftDateKey(p.todayKey, i - 6));
 
   return (

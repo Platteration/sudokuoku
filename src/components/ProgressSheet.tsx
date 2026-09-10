@@ -6,8 +6,8 @@ import {
   CLEAN_HINT_LIMIT,
   Difficulty,
   Profile,
-  currentStreak,
   levelInfo,
+  profileStreak,
 } from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 import { formatTime } from '../utils/time';
@@ -34,7 +34,7 @@ const GROUPS: { key: Badge['group']; title: string }[] = [
 export default function ProgressSheet({ visible, profile, todayKey, onClose, onReset }: Props) {
   const styles = useStyles(makeStyles);
   const level = levelInfo(profile.xp);
-  const streak = currentStreak(profile.daily, todayKey);
+  const streak = profileStreak(profile, todayKey);
   const unlocked = Object.keys(profile.badges).length;
   const pct = level.span > 0 ? Math.min(1, level.into / level.span) : 1;
 

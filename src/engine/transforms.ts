@@ -278,6 +278,20 @@ export function randomShift(rng: Rng, enabled: ShiftKind[]): Shift | null {
   return randomShiftOfKind(rng, pick(rng, enabled));
 }
 
+/**
+ * Joins the parts of one move into a single sentence, e.g.
+ * "Board rotated clockwise, then rows 4–6 slid down 1". A move may fire
+ * several shifts (`shiftsPerMove`), and the player has to be told about all
+ * of them: naming only one describes half of what they just watched happen.
+ * Every description starts a sentence, so the later ones are lower-cased.
+ */
+export function joinDescriptions(parts: readonly string[]): string {
+  const kept = parts.filter((p) => p.length > 0);
+  return kept
+    .map((p, i) => (i === 0 ? p : p[0].toLowerCase() + p.slice(1)))
+    .join(', then ');
+}
+
 /** Moves array contents according to the shift's position permutation. */
 export function permute<T>(items: readonly T[], shift: Shift): T[] {
   const out = new Array<T>(items.length);
