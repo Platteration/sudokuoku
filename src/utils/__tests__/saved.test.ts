@@ -273,8 +273,9 @@ describe('a save that was edited', () => {
   });
 
   it('refuses a daily whose day is not a date', () => {
-    // shiftDateKey('NaN-NaN-NaN', -1) is 'NaN-NaN-NaN' again, so such a key
-    // walks the streak for ever the moment the game is won.
+    // A daily is filed under its day and its rules are rebuilt from it, so a
+    // key that is not a day leaves a daily with nothing to be: 'NaN-NaN-NaN'
+    // is its own previous day, which is what used to walk the streak for ever.
     expect(readSavedGame(almostWon(22, { dailyKey: 'NaN-NaN-NaN' }), 'daily')).toBeNull();
     expect(readSavedGame(almostWon(22, { dailyKey: '2026-9-6' }), 'daily')).toBeNull();
     expect(readSavedGame(almostWon(22, { dailyKey: 42 }), 'daily')).toBeNull();

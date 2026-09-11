@@ -8,6 +8,7 @@ import {
   Profile,
   levelInfo,
   profileStreak,
+  unlockedBadges,
 } from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 import { formatTime } from '../utils/time';
@@ -35,7 +36,10 @@ export default function ProgressSheet({ visible, profile, todayKey, onClose, onR
   const styles = useStyles(makeStyles);
   const level = levelInfo(profile.xp);
   const streak = profileStreak(profile, todayKey);
-  const unlocked = Object.keys(profile.badges).length;
+  // Counted from the badges this build has, never from the size of the stored
+  // map: a profile keeps ids it does not know (a later build's, a renamed
+  // one) rather than deleting them, and those are not part of "7 of 24".
+  const unlocked = unlockedBadges(profile).length;
   const pct = level.span > 0 ? Math.min(1, level.into / level.span) : 1;
 
   return (

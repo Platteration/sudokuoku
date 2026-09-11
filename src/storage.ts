@@ -2,16 +2,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameState, Profile, normalizeProfile } from './engine';
 import { GameSlot, SharedSettings, forStorage, readSavedGame } from './utils/saved';
 
-const FREE_GAME_KEY = 'sudokuoku:game:v1';
-const DAILY_GAME_KEY = 'sudokuoku:daily:v1';
+/**
+ * Where each of the two games is stored. Which kind of game a save is read as
+ * is decided by the slot (see `readSavedGame`), so the slot and the key are
+ * one thing here rather than two arguments that have to agree: paired by hand,
+ * a transposition typechecks, restores every daily into the free game — which
+ * has no staleness check — and destroys the free game on every launch.
+ */
+const GAME_KEYS: Record<GameSlot, string> = {
+  free: 'sudokuoku:game:v1',
+  daily: 'sudokuoku:daily:v1',
+};
+
 const PROFILE_KEY = 'sudokuoku:profile:v1';
 const SHARED_SETTINGS_KEY = 'sudokuoku:settings:v1';
 const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
 const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
 
-async function loadState(key: string, slot: GameSlot): Promise<GameState | null> {
+async function loadState(slot: GameSlot): Promise<GameState | null> {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await AsyncStorage.getItem(GAME_KEYS[slot]);
     if (!raw) return null;
     // A save is untrusted input: see src/utils/saved.ts for what is believed.
     // The slot, not the save, says which kind of game is in it.
@@ -21,22 +31,22 @@ async function loadState(key: string, slot: GameSlot): Promise<GameState | null>
   }
 }
 
-async function saveState(key: string, state: GameState): Promise<void> {
+async function saveState(slot: GameSlot, state: GameState): Promise<void> {
   try {
-    await AsyncStorage.setItem(key, JSON.stringify(forStorage(state)));
+    await AsyncStorage.setItem(GAME_KEYS[slot], JSON.stringify(forStorage(state)));
   } catch {
     // Persisting is best-effort; the game keeps working without it.
   }
 }
 
-export const loadGame = () => loadState(FREE_GAME_KEY, 'free');
-export const saveGame = (state: GameState) => saveState(FREE_GAME_KEY, state);
-export const loadDailyGame = () => loadState(DAILY_GAME_KEY, 'daily');
-export const saveDailyGame = (state: GameState) => saveState(DAILY_GAME_KEY, state);
+export const loadGame = () => loadState('free');
+export const saveGame = (state: GameState) => saveState('free', state);
+export const loadDailyGame = () => loadState('daily');
+export const saveDailyGame = (state: GameState) => saveState('daily', state);
 
 export async function clearDailyGame(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(DAILY_GAME_KEY);
+    await AsyncStorage.removeItem(GAME_KEYS.daily);
   } catch {
     // best-effort
   }

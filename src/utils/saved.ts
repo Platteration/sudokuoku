@@ -284,9 +284,10 @@ export function readSavedGame(parsed: unknown, slot: GameSlot): GameState | null
   const board = readSnapshot(raw);
   if (!board) return null;
   const s = raw as Record<string, unknown>;
-  // A day that is not a date cannot be stepped back from, so it hangs the
-  // streak walk the moment the game is won; and a daily with no day is not a
-  // daily at all, so there is nothing in that slot worth restoring.
+  // A daily with no real day is not a daily at all, so there is nothing in
+  // that slot worth restoring: the key is what the result is filed under, what
+  // the rules below are rebuilt from, and what the streak is walked back from
+  // the moment the game is won.
   const dailyKey = slot === 'daily' && isDateKey(s.dailyKey) ? s.dailyKey : null;
   if (slot === 'daily' && dailyKey === null) return null;
   const settings = cleanSettings(s.settings);

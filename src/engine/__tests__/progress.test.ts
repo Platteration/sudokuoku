@@ -20,6 +20,7 @@ import {
   formatClock,
   isDateKey,
   levelInfo,
+  MAX_STREAK_DAYS,
   normalizeProfile,
   parseDateKey,
   profileStreak,
@@ -28,6 +29,7 @@ import {
   shareText,
   shiftDateKey,
   todaysDailyInProgress,
+  unlockedBadges,
   xpForLevel,
   xpForWin,
 } from '../progress';
@@ -44,6 +46,49 @@ function winGame(state: GameState, elapsed = 300): GameState {
   return { ...s, elapsed };
 }
 
+/** Runs `fn` with the process in `tz`, and puts TZ back however it was. */
+function inZone(tz: string, fn: () => void): void {
+  const had = Object.prototype.hasOwnProperty.call(process.env, 'TZ');
+  const before = process.env.TZ;
+  process.env.TZ = tz;
+  try {
+    fn();
+  } finally {
+    if (had) process.env.TZ = before;
+    else delete process.env.TZ;
+  }
+}
+
+/**
+ * Keys written out rather than stepped: stepping is the thing under test, so
+ * the sample must not be built with it. Covers both date-line skips, both leap
+ * cases and every month end.
+ */
+function sampleKeys(): string[] {
+  const out: string[] = [];
+  for (const y of [1970, 1994, 1995, 2000, 2011, 2012, 2024, 2026, 2036]) {
+    for (let m = 1; m <= 12; m++) {
+      for (const d of [1, 2, 15, 28, 29, 30, 31]) {
+        out.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Zones that have skipped a whole calendar day at the date line, and the day
+ * each one lands on after the skip. Pacific/Apia and Pacific/Fakaofo never had
+ * a 2011-12-30; Pacific/Enderbury and Pacific/Kiritimati never had a
+ * 1994-12-31.
+ */
+const SKIPPED_DAY_ZONES: [string, string][] = [
+  ['Pacific/Apia', '2011-12-31'],
+  ['Pacific/Fakaofo', '2011-12-31'],
+  ['Pacific/Enderbury', '1995-01-01'],
+  ['Pacific/Kiritimati', '1995-01-01'],
+];
+
 describe('date keys', () => {
   it('formats and parses local dates', () => {
     const d = new Date(2026, 8, 6);
@@ -52,7 +97,45 @@ describe('date keys', () => {
     expect(shiftDateKey('2026-09-06', -1)).toBe('2026-09-05');
     expect(shiftDateKey('2026-01-01', -1)).toBe('2025-12-31');
     expect(shiftDateKey('2026-02-28', 1)).toBe('2026-03-01');
+    expect(shiftDateKey('2024-03-01', -1)).toBe('2024-02-29');
+    expect(shiftDateKey('2023-03-01', -1)).toBe('2023-02-28');
   });
+
+  const zones = ['UTC', 'America/New_York', 'Australia/Lord_Howe', ...SKIPPED_DAY_ZONES.map(([z]) => z)];
+  for (const tz of zones) {
+    it(`steps every key it accepts onto a different day in ${tz}`, () => {
+      inZone(tz, () => {
+        const accepted = sampleKeys().filter(isDateKey);
+        expect(accepted.length).toBeGreaterThan(600);
+        for (const key of accepted) {
+          const back = shiftDateKey(key, -1);
+          const on = shiftDateKey(key, 1);
+          // The whole streak walk rests on this: a step that stands still on
+          // a key isDateKey accepts is a loop with no way out of it. Four
+          // zones skipped a calendar day, and asking the local calendar for
+          // midnight of a day that was never struck answers with the day
+          // after it — so this used to be the identity here.
+          expect(back).not.toBe(key);
+          expect(on).not.toBe(key);
+          // Four-digit years make the written order the calendar order.
+          expect(back < key).toBe(true);
+          expect(on > key).toBe(true);
+        }
+      });
+    });
+  }
+
+  for (const [tz, key] of SKIPPED_DAY_ZONES) {
+    it(`steps back from the day after the skipped one in ${tz}`, () => {
+      inZone(tz, () => {
+        // The key is a real day there and the app accepts it, which is what
+        // made this reachable with no tampering at all: a device in this zone
+        // with its clock on this date, solving that day's daily.
+        expect(isDateKey(key)).toBe(true);
+        expect(shiftDateKey(key, -1)).not.toBe(key);
+      });
+    });
+  }
 });
 
 describe('daily config', () => {
@@ -427,6 +510,60 @@ describe('a profile or a save that was edited', () => {
     expect(currentStreak({ '2026-09-06': result('2026-09-06') }, '2026-09-06')).toBe(1);
   });
 
+  it('counts from no day the app did not write', () => {
+    // '2026-9-6' is not how a day is written here, but it parses and steps
+    // onto a real one, so a today that came off the disk in that form would
+    // otherwise be credited with the whole run standing behind it.
+    const daily = {
+      '2026-09-05': result('2026-09-05'),
+      '2026-09-04': result('2026-09-04'),
+    };
+    expect(currentStreak(daily, '2026-9-6')).toBe(0);
+    expect(currentStreak(daily, '2026-09-06')).toBe(2);
+  });
+
+  it('stops at a key it could never have written itself', () => {
+    // The walk steps by calendar days, and below year 1000 it steps out of
+    // the four-digit form every stored key has. Such a key is not a day this
+    // app recorded, and stepping on from one lands back in the 1900s.
+    const daily = { '1000-01-01': result('1000-01-01'), '999-12-31': result('999-12-31') };
+    expect(isDateKey('999-12-31')).toBe(false);
+    expect(shiftDateKey('1000-01-01', -1)).toBe('999-12-31');
+    expect(currentStreak(daily, '1000-01-01')).toBe(1);
+  });
+
+  it('counts a long run up to a bound rather than walking whatever is there', () => {
+    // The walk runs on the JS thread inside a React commit, over a map that
+    // came off the disk. Ten years is past anything a player can hold, and
+    // the bound is what makes the walk finite whether or not the calendar is.
+    const daily: Record<string, DailyResult> = {};
+    let key = '2026-09-11';
+    for (let i = 0; i < MAX_STREAK_DAYS + 400; i++) {
+      daily[key] = result(key);
+      key = shiftDateKey(key, -1);
+    }
+    expect(Object.keys(daily).length).toBe(MAX_STREAK_DAYS + 400);
+    expect(currentStreak(daily, '2026-09-11')).toBe(MAX_STREAK_DAYS);
+  });
+
+  for (const [tz, key] of SKIPPED_DAY_ZONES) {
+    it(`counts and records a daily in ${tz}, which skipped the day before ${key}`, () => {
+      inZone(tz, () => {
+        // No tampering in this one: a device in this zone, its clock on this
+        // date, solving that day's real daily. Stepping the day back used to
+        // land on the day it started from, and recordGameWin never returned.
+        const won = winGame(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 30), 100);
+        const daily: GameState = { ...won, mode: 'daily', dailyKey: key };
+        const out = recordGameWin(emptyProfile(), daily, parseDateKey(key));
+        expect(Object.keys(out.profile.daily)).toEqual([key]);
+        expect(out.streak).toBe(1);
+        expect(out.profile.bestStreak).toBe(1);
+        // And the profile that win wrote reads the same way afterwards.
+        expect(profileStreak(normalizeProfile(out.profile), key)).toBe(1);
+      });
+    });
+  }
+
   it('records a won daily only under a real day', () => {
     const won = winGame(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 30), 100);
     const hostile: GameState = { ...won, mode: 'daily', dailyKey: 'NaN-NaN-NaN' };
@@ -458,18 +595,26 @@ describe('a profile or a save that was edited', () => {
     expect(currentStreak(p.daily, '2026-09-06')).toBe(1);
   });
 
-  it('files a stored daily under the day it is filed under', () => {
+  it('takes a stored daily from its day, not from what the record claims', () => {
+    const key = '2026-09-07'; // a Monday: easy, no phantoms
+    expect(dailyConfig(key)).toMatchObject({ difficulty: 'easy', phantom: false });
     const p = normalizeProfile({
       daily: {
-        '2026-09-07': { ...result('2026-09-07'), key: 'not-a-date', difficulty: 'impossible', phantom: 'yes' },
+        [key]: { ...result(key), key: 'not-a-date', difficulty: 'expert', phantom: true },
       },
     });
-    const stored = p.daily['2026-09-07'];
+    const stored = p.daily[key];
+    // Both claims are values the app itself writes on other days, so nothing
+    // coerces them: a daily's difficulty and phantom rule are a function of
+    // its date, and a record does not get to say otherwise. Believed, the
+    // card prints the day's own label ("Easy") beside a ghost section the day
+    // never had, and the Daily sheet swaps its Hints stat for Recalled.
+    expect(stored.difficulty).toBe('easy');
+    expect(stored.phantom).toBe(false);
+    expect(shareText(stored, 1)).not.toContain('👻');
     // dailyConfig is handed result.key by the share card, and a key that is
     // not a date used to take the button down with it.
-    expect(stored.key).toBe('2026-09-07');
-    expect(stored.difficulty).toBe(dailyConfig('2026-09-07').difficulty);
-    expect(stored.phantom).toBe(dailyConfig('2026-09-07').phantom);
+    expect(stored.key).toBe(key);
     expect(() => shareText(stored, 1)).not.toThrow();
   });
 
@@ -487,18 +632,50 @@ describe('a profile or a save that was edited', () => {
     const text = shareText(p.daily['2026-09-09'], 1);
     expect(text).not.toContain('evil.example');
     expect(text.split('\n')).toHaveLength(3);
+    // 2026-09-09 is a Wednesday, so it is a phantom day and the card says so
+    // in both places: the label comes from the day, and now so does the ghost
+    // section, whatever the record claims about itself.
     expect(text).toBe(
-      'Sudokuoku Daily 2026-09-09 · Medium · Phantom day\n⏱ 0:00 · 0 moves · 1 shifts · no hints\n🔥 1 day streak · +1 XP',
+      'Sudokuoku Daily 2026-09-09 · Medium · Phantom day\n⏱ 0:00 · 0 moves · 1 shifts · 👻 0/0 · no hints\n🔥 1 day streak · +1 XP',
     );
   });
 
-  it('keeps only badges the app has', () => {
+  it('changes nothing in a profile the app itself wrote', () => {
+    // Every repair here rewrites a field, so the one thing that must hold is
+    // that none of them touches a real record: the rules a daily is filed
+    // with are the rules it was played under, by construction.
+    let profile = emptyProfile();
+    for (const key of ['2026-09-06', '2026-09-07', '2026-09-09']) {
+      const settings = dailySettings(DEFAULT_SETTINGS, dailyConfig(key));
+      const won = winGame(newGame(settings, dailySeed(key), { mode: 'daily', dailyKey: key }), 240);
+      profile = recordGameWin(profile, won, parseDateKey(key)).profile;
+    }
+    expect(Object.keys(profile.daily)).toHaveLength(3);
+    expect(profile.daily['2026-09-06'].difficulty).toBe('expert'); // a Sunday
+    expect(profile.daily['2026-09-09'].phantom).toBe(true); // a Wednesday
+    expect(normalizeProfile(JSON.parse(JSON.stringify(profile)))).toEqual(profile);
+  });
+
+  it('keeps a badge id it does not know, and counts only the ones it has', () => {
     const p = normalizeProfile({
-      badges: { 'first-win': '2026-09-06T00:00:00.000Z', 'not-a-badge': 'x', 'streak-30': 7 },
+      badges: {
+        'first-win': '2026-09-06T00:00:00.000Z',
+        'from-a-later-build': '2026-09-06T00:00:00.000Z',
+        'streak-30': 7,
+      },
     });
-    expect(Object.keys(p.badges)).toEqual(['first-win']);
-    expect(Object.keys(p.badges).every((id) => BADGES.some((b) => b.id === id))).toBe(true);
-    // An array is an object too, and the progress sheet counts what is in it.
+    // The profile is the only record of a badge there is, and this function is
+    // what writes it back: an id from a build the player has downgraded from,
+    // or one this project renames, is kept rather than deleted for good.
+    expect(Object.keys(p.badges).sort()).toEqual(['first-win', 'from-a-later-build']);
+    // The unlock time still has to be one.
+    expect(p.badges['streak-30']).toBeUndefined();
+    // What an unknown id must not do is count: "7 of 24" is over the badges
+    // this build has, so nothing in the map can inflate it.
+    expect(unlockedBadges(p).map((b) => b.id)).toEqual(['first-win']);
+    expect(unlockedBadges(p).every((b) => BADGES.includes(b))).toBe(true);
+    // An array is an object too, and its own keys are its indices - '0', '1'
+    // - which would now go into the map as badge ids of their own.
     expect(normalizeProfile({ badges: ['first-win', 'streak-30'] }).badges).toEqual({});
   });
 
@@ -512,6 +689,10 @@ describe('a profile or a save that was edited', () => {
       frozenDays: { '2026-09-05': true, 'NaN-NaN-NaN': true },
     });
     expect(p.xp).toBe(0);
+    // XP is the level bar and the level is a title on screen, so the clamp has
+    // to hold over numbers too, not only over 'lots', which is 0 either way.
+    expect(normalizeProfile({ xp: -500 }).xp).toBe(0);
+    expect(normalizeProfile({ xp: 2.9 }).xp).toBe(2);
     expect(p.totals.won).toBe(0);
     expect(p.totals.played).toBe(0);
     expect(p.totals.shifts).toBe(0);
