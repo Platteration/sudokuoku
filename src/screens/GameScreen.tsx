@@ -107,6 +107,9 @@ export default function GameScreen() {
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
         if (profile !== loadedProfile) saveProfile(profile);
         let free: GameState;
+        // Only the daily slot is tested for staleness below, so the free slot
+        // must not be able to hold a daily: readSavedGame takes the kind of
+        // game from the slot it was read out of rather than from the save.
         if (savedFree && savedFree.status === 'playing') {
           free = savedFree;
         } else {

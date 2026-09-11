@@ -136,7 +136,7 @@ export default function DailySheet(p: Props) {
       </View>
       <Text style={styles.next}>
         Next daily in {untilMidnight()}. Miss a day and a freeze covers it, if you have one. You
-        get one freeze a month, up to three.
+        get one freeze a month, up to three. Your streak is kept on this device, by its clock.
       </Text>
     </Sheet>
   );

@@ -17,6 +17,8 @@ import {
   dailySettings,
   dateKey,
   emptyProfile,
+  formatClock,
+  isDateKey,
   levelInfo,
   normalizeProfile,
   parseDateKey,
@@ -394,5 +396,134 @@ describe('badges cannot be farmed with hints', () => {
     expect(p.stats.hard.cleanWins).toBe(0);
     expect(p.totals.cleanWins).toBe(0);
     expect(p.totals.won).toBe(5);
+  });
+});
+
+describe('a profile or a save that was edited', () => {
+  const result = (key: string): DailyResult => ({
+    key, difficulty: 'medium', phantom: false, elapsed: 100, moves: 50, shifts: 49, hints: 0,
+    phantomsRecalled: 0, phantomsMissed: 0, xp: 100,
+  });
+
+  it('tells a date key from a string that only looks like one', () => {
+    expect(isDateKey(dateKey(new Date()))).toBe(true);
+    expect(isDateKey('2026-09-06')).toBe(true);
+    expect(isDateKey('NaN-NaN-NaN')).toBe(false);
+    expect(isDateKey('2026-9-6')).toBe(false);
+    expect(isDateKey('2026-13-45')).toBe(false); // parses, but not back to itself
+    expect(isDateKey('')).toBe(false);
+    expect(isDateKey(42)).toBe(false);
+    expect(isDateKey(null)).toBe(false);
+  });
+
+  it('holds no streak on a day that is not a date, and stops walking', () => {
+    // parseDateKey gives an Invalid Date and dateKey renders it back as the
+    // same string, so the walk-back never leaves the key: the loop froze the
+    // JS thread inside the win effect and the app had to be force-quit.
+    expect(shiftDateKey('NaN-NaN-NaN', -1)).toBe('NaN-NaN-NaN');
+    expect(currentStreak({ 'NaN-NaN-NaN': result('NaN-NaN-NaN') }, 'NaN-NaN-NaN')).toBe(0);
+    expect(currentStreak({}, 'NaN-NaN-NaN', { 'NaN-NaN-NaN': true })).toBe(0);
+    // A real day is unaffected.
+    expect(currentStreak({ '2026-09-06': result('2026-09-06') }, '2026-09-06')).toBe(1);
+  });
+
+  it('records a won daily only under a real day', () => {
+    const won = winGame(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 30), 100);
+    const hostile: GameState = { ...won, mode: 'daily', dailyKey: 'NaN-NaN-NaN' };
+    const out = recordGameWin(emptyProfile(), hostile, new Date(2026, 8, 11));
+    expect(out.profile.daily).toEqual({});
+    expect(out.profile.totals.dailiesCompleted).toBe(0);
+    expect(out.streak).toBe(0);
+    // The win itself still counts; it is only not a daily.
+    expect(out.profile.totals.won).toBe(1);
+  });
+
+  it('answers dailyConfig for any key rather than throwing', () => {
+    // The Daily sheet's only button reaches this with a key off the disk.
+    expect(() => dailyConfig('not-a-date')).not.toThrow();
+    expect(dailyConfig('not-a-date').difficulty).toBe('medium');
+    expect(formatClock(Number.NaN)).toBe('0:00');
+  });
+
+  it('drops stored dailies that are not days, or not results', () => {
+    const p = normalizeProfile({
+      daily: {
+        '2026-09-06': result('2026-09-06'),
+        'NaN-NaN-NaN': result('NaN-NaN-NaN'),
+        yesterday: result('yesterday'),
+        '2026-09-07': 'done',
+      },
+    });
+    expect(Object.keys(p.daily)).toEqual(['2026-09-06']);
+    expect(currentStreak(p.daily, '2026-09-06')).toBe(1);
+  });
+
+  it('files a stored daily under the day it is filed under', () => {
+    const p = normalizeProfile({
+      daily: {
+        '2026-09-07': { ...result('2026-09-07'), key: 'not-a-date', difficulty: 'impossible', phantom: 'yes' },
+      },
+    });
+    const stored = p.daily['2026-09-07'];
+    // dailyConfig is handed result.key by the share card, and a key that is
+    // not a date used to take the button down with it.
+    expect(stored.key).toBe('2026-09-07');
+    expect(stored.difficulty).toBe(dailyConfig('2026-09-07').difficulty);
+    expect(stored.phantom).toBe(dailyConfig('2026-09-07').phantom);
+    expect(() => shareText(stored, 1)).not.toThrow();
+  });
+
+  it('a stored result cannot write the share card', () => {
+    const p = normalizeProfile({
+      daily: {
+        '2026-09-09': {
+          key: '2026-09-09',
+          moves: 'x\n\n>>> free coins at http://evil.example',
+          elapsed: {}, shifts: 1, hints: 0, phantom: false,
+          phantomsRecalled: 0, phantomsMissed: 0, xp: 1,
+        },
+      },
+    });
+    const text = shareText(p.daily['2026-09-09'], 1);
+    expect(text).not.toContain('evil.example');
+    expect(text.split('\n')).toHaveLength(3);
+    expect(text).toBe(
+      'Sudokuoku Daily 2026-09-09 · Medium · Phantom day\n⏱ 0:00 · 0 moves · 1 shifts · no hints\n🔥 1 day streak · +1 XP',
+    );
+  });
+
+  it('keeps only badges the app has', () => {
+    const p = normalizeProfile({
+      badges: { 'first-win': '2026-09-06T00:00:00.000Z', 'not-a-badge': 'x', 'streak-30': 7 },
+    });
+    expect(Object.keys(p.badges)).toEqual(['first-win']);
+    expect(Object.keys(p.badges).every((id) => BADGES.some((b) => b.id === id))).toBe(true);
+    // An array is an object too, and the progress sheet counts what is in it.
+    expect(normalizeProfile({ badges: ['first-win', 'streak-30'] }).badges).toEqual({});
+  });
+
+  it('counts in a profile are whole and never negative', () => {
+    const p = normalizeProfile({
+      xp: 'lots',
+      totals: { won: '99', played: null, shifts: -5, dailiesCompleted: 2.9 },
+      stats: { hard: { won: -3, played: 4, bestTime: -1, fewestShifts: 'none' } },
+      bestStreak: -7,
+      freezes: 99,
+      frozenDays: { '2026-09-05': true, 'NaN-NaN-NaN': true },
+    });
+    expect(p.xp).toBe(0);
+    expect(p.totals.won).toBe(0);
+    expect(p.totals.played).toBe(0);
+    expect(p.totals.shifts).toBe(0);
+    expect(p.totals.dailiesCompleted).toBe(2);
+    expect(p.stats.hard.won).toBe(0);
+    expect(p.stats.hard.played).toBe(4);
+    expect(p.stats.hard.bestTime).toBeNull();
+    expect(p.stats.hard.fewestShifts).toBeNull();
+    expect(p.bestStreak).toBe(0);
+    expect(p.freezes).toBe(MAX_FREEZES);
+    expect(Object.keys(p.frozenDays)).toEqual(['2026-09-05']);
+    // And levels are computed from a number, not from whatever was stored.
+    expect(levelInfo(p.xp).level).toBe(1);
   });
 });

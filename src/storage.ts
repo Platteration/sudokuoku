@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameState, Profile, normalizeProfile } from './engine';
-import { SharedSettings, forStorage, readSavedGame } from './utils/saved';
+import { GameSlot, SharedSettings, forStorage, readSavedGame } from './utils/saved';
 
 const FREE_GAME_KEY = 'sudokuoku:game:v1';
 const DAILY_GAME_KEY = 'sudokuoku:daily:v1';
@@ -9,12 +9,13 @@ const SHARED_SETTINGS_KEY = 'sudokuoku:settings:v1';
 const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
 const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
 
-async function loadState(key: string): Promise<GameState | null> {
+async function loadState(key: string, slot: GameSlot): Promise<GameState | null> {
   try {
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return null;
     // A save is untrusted input: see src/utils/saved.ts for what is believed.
-    return readSavedGame(JSON.parse(raw));
+    // The slot, not the save, says which kind of game is in it.
+    return readSavedGame(JSON.parse(raw), slot);
   } catch {
     return null;
   }
@@ -28,9 +29,9 @@ async function saveState(key: string, state: GameState): Promise<void> {
   }
 }
 
-export const loadGame = () => loadState(FREE_GAME_KEY);
+export const loadGame = () => loadState(FREE_GAME_KEY, 'free');
 export const saveGame = (state: GameState) => saveState(FREE_GAME_KEY, state);
-export const loadDailyGame = () => loadState(DAILY_GAME_KEY);
+export const loadDailyGame = () => loadState(DAILY_GAME_KEY, 'daily');
 export const saveDailyGame = (state: GameState) => saveState(DAILY_GAME_KEY, state);
 
 export async function clearDailyGame(): Promise<void> {

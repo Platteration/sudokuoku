@@ -5,9 +5,15 @@ import {
   GameState,
   RULE_KEYS,
   Settings,
+  dailyConfig,
+  dailySeed,
+  dailySettings,
+  emptyProfile,
   isLocked,
   newGame,
+  recordGameWin,
   reduce,
+  xpForWin,
 } from '../../engine';
 import {
   PERSISTED_HISTORY,
@@ -19,9 +25,22 @@ import {
   readSavedGame,
 } from '../saved';
 
+/**
+ * A board one cell short of complete, written by hand the way an edited save
+ * is: the next digit wins the game.
+ */
+function almostWon(seed: number, over: Record<string, unknown>): unknown {
+  const s = newGame(DEFAULT_SETTINGS, seed);
+  const values = s.solution.slice();
+  values[0] = 0;
+  return JSON.parse(
+    JSON.stringify({ ...s, values, given: new Array(CELLS).fill(false), selected: 0, ...over }),
+  );
+}
+
 /** Exactly what storage does: stringify on the way out, parse on the way in. */
 const roundTrip = (state: GameState): GameState | null =>
-  readSavedGame(JSON.parse(JSON.stringify(forStorage(state))));
+  readSavedGame(JSON.parse(JSON.stringify(forStorage(state))), 'free');
 
 /**
  * Plays `moves` moves without ever finishing the board: a digit goes in and
@@ -81,18 +100,18 @@ describe('reading a save back', () => {
   it('reads the older { state, elapsed } wrapper', () => {
     const s = play(DEFAULT_SETTINGS, 10, 2);
     const legacy = JSON.parse(JSON.stringify({ state: { ...s, elapsed: undefined }, elapsed: 42 }));
-    expect(readSavedGame(legacy)!.elapsed).toBe(42);
+    expect(readSavedGame(legacy, 'free')!.elapsed).toBe(42);
   });
 
   it('refuses anything that is not a board', () => {
     const s = play(DEFAULT_SETTINGS, 11, 2);
-    expect(readSavedGame(null)).toBeNull();
-    expect(readSavedGame('a string')).toBeNull();
-    expect(readSavedGame({})).toBeNull();
-    expect(readSavedGame({ ...s, values: s.values.slice(0, 80) })).toBeNull();
-    expect(readSavedGame({ ...s, solution: s.solution.slice(0, 40) })).toBeNull();
-    expect(readSavedGame({ ...s, given: s.given.slice(0, 3) })).toBeNull();
-    expect(readSavedGame({ ...s, values: s.values.map(() => 'x') })).toBeNull();
+    expect(readSavedGame(null, 'free')).toBeNull();
+    expect(readSavedGame('a string', 'free')).toBeNull();
+    expect(readSavedGame({}, 'free')).toBeNull();
+    expect(readSavedGame({ ...s, values: s.values.slice(0, 80) }, 'free')).toBeNull();
+    expect(readSavedGame({ ...s, solution: s.solution.slice(0, 40) }, 'free')).toBeNull();
+    expect(readSavedGame({ ...s, given: s.given.slice(0, 3) }, 'free')).toBeNull();
+    expect(readSavedGame({ ...s, values: s.values.map(() => 'x') }, 'free')).toBeNull();
   });
 
   it('refuses tokens that are not a permutation of the cells', () => {
@@ -101,19 +120,19 @@ describe('reading a save back', () => {
     const s = play(DEFAULT_SETTINGS, 12, 2);
     const duplicated = s.tokens.slice();
     duplicated[0] = duplicated[1];
-    expect(readSavedGame({ ...s, tokens: duplicated })).toBeNull();
+    expect(readSavedGame({ ...s, tokens: duplicated }, 'free')).toBeNull();
     const outOfRange = s.tokens.slice();
     outOfRange[0] = CELLS + 5;
-    expect(readSavedGame({ ...s, tokens: outOfRange })).toBeNull();
-    expect(readSavedGame({ ...s, tokens: s.tokens.map(() => 0) })).toBeNull();
+    expect(readSavedGame({ ...s, tokens: outOfRange }, 'free')).toBeNull();
+    expect(readSavedGame({ ...s, tokens: s.tokens.map(() => 0) }, 'free')).toBeNull();
   });
 
   it('drops a shift event the board could not draw', () => {
     const s = play(DEFAULT_SETTINGS, 13, 2);
     expect(s.lastShift).not.toBeNull();
-    expect(readSavedGame({ ...s, lastShift: { ...s.lastShift, dest: 'nope' } })!.lastShift).toBeNull();
-    expect(readSavedGame({ ...s, lastShift: { ...s.lastShift, kind: 'wobble' } })!.lastShift).toBeNull();
-    expect(readSavedGame({ ...s, lastShift: s.lastShift })!.lastShift).toEqual(s.lastShift);
+    expect(readSavedGame({ ...s, lastShift: { ...s.lastShift, dest: 'nope' } }, 'free')!.lastShift).toBeNull();
+    expect(readSavedGame({ ...s, lastShift: { ...s.lastShift, kind: 'wobble' } }, 'free')!.lastShift).toBeNull();
+    expect(readSavedGame({ ...s, lastShift: s.lastShift }, 'free')!.lastShift).toEqual(s.lastShift);
   });
 
   it('repairs what it can rather than dropping the game', () => {
@@ -127,7 +146,7 @@ describe('reading a save back', () => {
       phantoms: [{ nonsense: true }],
       lastPhantom: 7,
       history: [...s.history, { values: 3 }],
-    })!;
+    }, 'free')!;
     expect(patched.notes).toEqual(new Array(CELLS).fill(0));
     expect(patched.selected).toBeNull();
     expect(patched.elapsed).toBe(0);
@@ -223,5 +242,84 @@ describe('shared settings', () => {
     ).toEqual(free);
     expect(applyShared(free, null)).toEqual(free);
     expect(applyShared(free, 'nope')).toEqual(free);
+  });
+});
+
+describe('a save that was edited', () => {
+  const hostile = (over: Record<string, unknown>): unknown =>
+    JSON.parse(JSON.stringify({ ...play(DEFAULT_SETTINGS, 20, 2), ...over }));
+
+  it('cannot pass a daily off as the free game', () => {
+    // Only the daily slot is checked for staleness, so a daily-mode game
+    // restored into the free one is played as a daily for whatever date it
+    // names. Which game a save is comes from the slot, not from the save.
+    const restored = readSavedGame(hostile({ mode: 'daily', dailyKey: '2026-09-05' }), 'free')!;
+    expect(restored.mode).toBe('free');
+    expect(restored.dailyKey).toBeNull();
+  });
+
+  it('cannot mint a daily result by finishing one in the free slot', () => {
+    const raw = almostWon(21, { mode: 'daily', dailyKey: '2026-09-05', status: 'playing' });
+    const restored = readSavedGame(raw, 'free')!;
+    const won = reduce(restored, { type: 'input', digit: restored.solution[0] });
+    expect(won.status).toBe('won');
+    const out = recordGameWin(emptyProfile(), won, new Date(2026, 8, 11));
+    expect(out.profile.daily).toEqual({});
+    expect(out.profile.totals.dailiesCompleted).toBe(0);
+    expect(out.streak).toBe(0);
+    expect(out.newBadges.map((b) => b.id)).not.toContain('daily-first');
+    // The win still counts as a win: it is only not a daily.
+    expect(out.profile.totals.won).toBe(1);
+  });
+
+  it('refuses a daily whose day is not a date', () => {
+    // shiftDateKey('NaN-NaN-NaN', -1) is 'NaN-NaN-NaN' again, so such a key
+    // walks the streak for ever the moment the game is won.
+    expect(readSavedGame(almostWon(22, { dailyKey: 'NaN-NaN-NaN' }), 'daily')).toBeNull();
+    expect(readSavedGame(almostWon(22, { dailyKey: '2026-9-6' }), 'daily')).toBeNull();
+    expect(readSavedGame(almostWon(22, { dailyKey: 42 }), 'daily')).toBeNull();
+    expect(readSavedGame(almostWon(22, { dailyKey: null }), 'daily')).toBeNull();
+    expect(readSavedGame(almostWon(22, { dailyKey: '2026-09-05' }), 'daily')!.dailyKey).toBe(
+      '2026-09-05',
+    );
+  });
+
+  it('plays a restored daily by its own day\u2019s rules, not the save\u2019s', () => {
+    const key = '2026-09-07'; // Monday: easy, no phantoms
+    const real = newGame(dailySettings(DEFAULT_SETTINGS, dailyConfig(key)), dailySeed(key), {
+      mode: 'daily',
+      dailyKey: key,
+    });
+    const raw = JSON.parse(
+      JSON.stringify({
+        ...real,
+        settings: { ...real.settings, difficulty: 'expert', phantomMode: true, shiftEvery: 9, theme: 'dark' },
+      }),
+    );
+    const restored = readSavedGame(raw, 'daily')!;
+    // The rules are a function of the day, so they come back as the app built
+    // them; a save claiming expert would otherwise buy the expert XP.
+    expect(restored.settings.difficulty).toBe(real.settings.difficulty);
+    expect(restored.settings.difficulty).not.toBe('expert');
+    expect(restored.settings.phantomMode).toBe(real.settings.phantomMode);
+    expect(restored.settings.shiftEvery).toBe(real.settings.shiftEvery);
+    // The player's own assists are still the player's.
+    expect(restored.settings.theme).toBe('dark');
+  });
+
+  it('counts cannot come back negative', () => {
+    // XP, the clean-win test and the best times are read straight off these:
+    // -100 hints is 1,500 XP and a clean win at any difficulty.
+    const restored = readSavedGame(
+      hostile({ hintsUsed: -100, moves: -5, elapsed: -3600, shiftCount: 2.7, phantomsRecalled: -9 }),
+      'free',
+    )!;
+    expect(restored.hintsUsed).toBe(0);
+    expect(restored.moves).toBe(0);
+    expect(restored.elapsed).toBe(0);
+    expect(restored.shiftCount).toBe(2);
+    expect(restored.phantomsRecalled).toBe(0);
+    // Worth exactly a clean win of that difficulty plus its two shifts.
+    expect(xpForWin(restored)).toBe(xpForWin(newGame(restored.settings, 1)) + 2);
   });
 });

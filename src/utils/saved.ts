@@ -29,6 +29,9 @@ import {
   Phantom,
   Settings,
   ShiftKind,
+  dailyConfig,
+  dailySettings,
+  isDateKey,
 } from '../engine';
 
 /**
@@ -169,6 +172,14 @@ function hasBoard(x: unknown): boolean {
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 
+/**
+ * A counter, made safe: whole and never negative. XP, the badges and the best
+ * times are read straight off these, and `num` alone would let a save that
+ * claims -100 hints buy a clean win and 1,500 XP.
+ */
+const count = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : fallback;
+
 const noteGrid = (x: unknown): number[] =>
   Array.isArray(x) && x.length === CELLS && x.every((v) => Number.isInteger(v) && v >= 0)
     ? (x as number[])
@@ -239,23 +250,33 @@ function readSnapshot(raw: unknown): Snapshot | null {
     tokens: s.tokens as number[],
     notes: noteGrid(s.notes),
     selected: position(s.selected),
-    moves: num(s.moves, 0),
+    moves: count(s.moves, 0),
     lastShift: shiftEvent(s.lastShift),
-    shiftCount: num(s.shiftCount, 0),
+    shiftCount: count(s.shiftCount, 0),
     phantoms: phantomGrid(s.phantoms),
     lastPhantom: phantom(s.lastPhantom),
-    phantomCount: num(s.phantomCount, 0),
-    phantomsRecalled: num(s.phantomsRecalled, 0),
-    phantomsMissed: num(s.phantomsMissed, 0),
+    phantomCount: count(s.phantomCount, 0),
+    phantomsRecalled: count(s.phantomsRecalled, 0),
+    phantomsMissed: count(s.phantomsMissed, 0),
   };
 }
+
+/** Which of the two stored games a save was read out of. */
+export type GameSlot = 'free' | 'daily';
 
 /**
  * Restores one game from a parsed save, or null when there is no usable game
  * in it. Fields the app can rebuild are repaired rather than rejected, so an
  * older or slightly damaged save keeps its board instead of being thrown away.
+ *
+ * What kind of game it is comes from the slot it was read out of, not from the
+ * save: the app writes a daily to the daily key and a free game to the free
+ * one, so a save that says otherwise is one that was edited. Believed, it
+ * hands a daily-mode game to the free game's restore — which has no staleness
+ * check, because only the daily slot was ever asked for one — and completing
+ * it mints a daily result, a streak and badges for whatever date it names.
  */
-export function readSavedGame(parsed: unknown): GameState | null {
+export function readSavedGame(parsed: unknown, slot: GameSlot): GameState | null {
   if (!parsed || typeof parsed !== 'object') return null;
   const wrapper = parsed as { state?: unknown; elapsed?: unknown };
   // Older saves wrapped the state as { state, elapsed }.
@@ -263,17 +284,26 @@ export function readSavedGame(parsed: unknown): GameState | null {
   const board = readSnapshot(raw);
   if (!board) return null;
   const s = raw as Record<string, unknown>;
+  // A day that is not a date cannot be stepped back from, so it hangs the
+  // streak walk the moment the game is won; and a daily with no day is not a
+  // daily at all, so there is nothing in that slot worth restoring.
+  const dailyKey = slot === 'daily' && isDateKey(s.dailyKey) ? s.dailyKey : null;
+  if (slot === 'daily' && dailyKey === null) return null;
+  const settings = cleanSettings(s.settings);
   return {
     ...board,
-    settings: cleanSettings(s.settings),
+    // The daily's rules are a function of its date, so they are rebuilt from
+    // the day rather than read back: the save only carries the player's own
+    // assists. Otherwise a save claiming expert buys the expert XP.
+    settings: dailyKey ? dailySettings(settings, dailyConfig(dailyKey)) : settings,
     seed: num(s.seed, 0),
-    mode: s.mode === 'daily' ? 'daily' : 'free',
-    dailyKey: typeof s.dailyKey === 'string' ? s.dailyKey : null,
-    elapsed: num(s.elapsed, num(wrapper.elapsed, 0)),
+    mode: dailyKey ? 'daily' : 'free',
+    dailyKey,
+    elapsed: count(s.elapsed, count(wrapper.elapsed, 0)),
     notesMode: s.notesMode === true,
     status: s.status === 'won' ? 'won' : 'playing',
     version: num(s.version, 0),
-    hintsUsed: num(s.hintsUsed, 0),
+    hintsUsed: count(s.hintsUsed, 0),
     history: (Array.isArray(s.history) ? s.history : [])
       .map(readSnapshot)
       .filter((snap): snap is Snapshot => snap !== null),

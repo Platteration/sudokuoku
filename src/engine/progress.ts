@@ -28,6 +28,35 @@ export function shiftDateKey(key: string, days: number): string {
   return dateKey(d);
 }
 
+/**
+ * True when a key is a real calendar day, written the way `dateKey` writes
+ * one. Keys arrive from storage as well as from the clock, and an unparseable
+ * one is not merely wrong: `parseDateKey` answers it with an Invalid Date and
+ * `dateKey` renders that back as the same string, so stepping such a key never
+ * leaves it and anything that walks days backwards never stops.
+ */
+export function isDateKey(key: unknown): key is string {
+  return (
+    typeof key === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(key) &&
+    dateKey(parseDateKey(key)) === key
+  );
+}
+
+/**
+ * A count from storage, made safe: whole, finite and never negative. XP, the
+ * badges, the result card and the clock are all read off these numbers, and a
+ * stored profile is untrusted input like any other file on the device.
+ */
+function count(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : fallback;
+}
+
+/** A stored best-of: a count, or null when there is not one yet. */
+function best(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
+}
+
 /** FNV-1a hash of the key, so every player gets the same board on a day. */
 export function dailySeed(key: string): number {
   let h = 0x811c9dc5;
@@ -59,7 +88,9 @@ const WEEKDAY_DIFFICULTY: Difficulty[] = [
 
 export function dailyConfig(key: string): DailyConfig {
   const day = parseDateKey(key).getDay();
-  const difficulty = WEEKDAY_DIFFICULTY[day];
+  // Total for any key: a day that is not a date still has to produce a card
+  // rather than throw in whichever screen asked for it.
+  const difficulty = WEEKDAY_DIFFICULTY[day] ?? 'medium';
   const phantom = day === 0 || day === 3;
   const cap = difficulty[0].toUpperCase() + difficulty.slice(1);
   return { key, difficulty, phantom, label: phantom ? `${cap} · Phantom day` : cap };
@@ -161,9 +192,13 @@ export function currentStreak(
   todayKey: string,
   frozen: FrozenDays = {},
 ): number {
+  // A key that is not a date has no day before it, so the walk below would
+  // step onto itself for ever. Both the profile and the game a key comes from
+  // are storage, so this is reachable input, not a hypothetical.
+  if (!isDateKey(todayKey)) return 0;
   let key = dayHeld(daily, frozen, todayKey) ? todayKey : shiftDateKey(todayKey, -1);
   let n = 0;
-  while (dayHeld(daily, frozen, key)) {
+  while (isDateKey(key) && dayHeld(daily, frozen, key)) {
     n++;
     key = shiftDateKey(key, -1);
   }
@@ -222,7 +257,7 @@ export function refreshStreak(profile: Profile, todayKey: string): Profile {
 }
 
 export function formatClock(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
+  const s = Number.isFinite(totalSeconds) ? Math.max(0, Math.floor(totalSeconds)) : 0;
   const m = Math.floor(s / 60);
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
@@ -230,12 +265,20 @@ export function formatClock(totalSeconds: number): string {
 /** Wordle-style share text. */
 export function shareText(result: DailyResult, streak: number): string {
   const cfg = dailyConfig(result.key);
+  // Every number is counted rather than interpolated as it arrived: this text
+  // goes to the OS share sheet exactly as written, and a result read back from
+  // a damaged or edited profile would otherwise put its own lines in it.
+  const moves = count(result.moves);
+  const shifts = count(result.shifts);
+  const hints = count(result.hints);
+  const recalled = count(result.phantomsRecalled);
+  const missed = count(result.phantomsMissed);
   const lines = [
     `Sudokuoku Daily ${result.key} · ${cfg.label}`,
-    `⏱ ${formatClock(result.elapsed)} · ${result.moves} moves · ${result.shifts} shifts` +
-      (result.phantom ? ` · 👻 ${result.phantomsRecalled}/${result.phantomsRecalled + result.phantomsMissed}` : '') +
-      (result.hints > 0 ? ` · 💡 ${result.hints}` : ' · no hints'),
-    `🔥 ${streak} day streak · +${result.xp} XP`,
+    `⏱ ${formatClock(result.elapsed)} · ${moves} moves · ${shifts} shifts` +
+      (result.phantom ? ` · 👻 ${recalled}/${recalled + missed}` : '') +
+      (hints > 0 ? ` · 💡 ${hints}` : ' · no hints'),
+    `🔥 ${count(streak)} day streak · +${count(result.xp)} XP`,
   ];
   return lines.join('\n');
 }
@@ -395,25 +438,96 @@ export function emptyProfile(): Profile {
   };
 }
 
-/** Fills in anything an older or partial profile lacks. */
+const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
+
+/**
+ * One stored daily result, repaired. The day it is filed under is the truth:
+ * a daily's difficulty and phantom rule are a function of its date, so a
+ * record that claims otherwise is corrected rather than believed, and every
+ * number is counted. A result goes straight into the Daily sheet and into the
+ * share card, where a field that is not the number it claims to be either
+ * crashes the sheet or writes lines of its own.
+ */
+function dailyResult(raw: unknown, key: string): DailyResult | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const cfg = dailyConfig(key);
+  return {
+    key,
+    difficulty: DIFFICULTIES.includes(r.difficulty as Difficulty)
+      ? (r.difficulty as Difficulty)
+      : cfg.difficulty,
+    phantom: typeof r.phantom === 'boolean' ? r.phantom : cfg.phantom,
+    elapsed: count(r.elapsed),
+    moves: count(r.moves),
+    shifts: count(r.shifts),
+    hints: count(r.hints),
+    phantomsRecalled: count(r.phantomsRecalled),
+    phantomsMissed: count(r.phantomsMissed),
+    xp: count(r.xp),
+  };
+}
+
+/**
+ * Fills in anything an older or partial profile lacks, and believes none of
+ * it. The profile is a file on the device like a save is, nothing in the app
+ * ever repairs or clears it, and what comes out of it is read by arithmetic,
+ * by the badge count and by the share card.
+ */
 export function normalizeProfile(raw: unknown): Profile {
   const empty = emptyProfile();
   if (!raw || typeof raw !== 'object') return empty;
   const p = raw as Partial<Profile>;
   const stats = emptyStats();
-  for (const d of Object.keys(stats) as Difficulty[]) {
-    stats[d] = { ...EMPTY_DIFFICULTY, ...(p.stats?.[d] ?? {}) };
+  for (const d of DIFFICULTIES) {
+    const s = (p.stats?.[d] ?? {}) as Record<string, unknown>;
+    stats[d] = {
+      played: count(s.played),
+      won: count(s.won),
+      cleanWins: count(s.cleanWins),
+      bestTime: best(s.bestTime),
+      fewestShifts: best(s.fewestShifts),
+      phantomsRecalled: count(s.phantomsRecalled),
+      phantomsMissed: count(s.phantomsMissed),
+    };
+  }
+  const rawTotals = (p.totals ?? {}) as Record<string, unknown>;
+  const totals = { ...empty.totals };
+  for (const k of Object.keys(totals) as (keyof Totals)[]) totals[k] = count(rawTotals[k]);
+  // Both maps are keyed by day, and a key that is not a day is not merely
+  // useless: it cannot be stepped back from, so the streak walk never leaves
+  // it. Entries under one are dropped rather than carried.
+  const daily: Record<string, DailyResult> = {};
+  const rawDaily = (p.daily && typeof p.daily === 'object' ? p.daily : {}) as Record<string, unknown>;
+  for (const key of Object.keys(rawDaily)) {
+    if (!isDateKey(key)) continue;
+    const result = dailyResult(rawDaily[key], key);
+    if (result) daily[key] = result;
+  }
+  const frozenDays: FrozenDays = {};
+  const rawFrozen = (p.frozenDays && typeof p.frozenDays === 'object' ? p.frozenDays : {}) as Record<string, unknown>;
+  for (const key of Object.keys(rawFrozen)) if (isDateKey(key) && rawFrozen[key]) frozenDays[key] = true;
+  // Badges are counted ("7 of 24") as well as looked up, so an id the app
+  // does not have is an unlock that was never earned.
+  const known = new Set(BADGES.map((b) => b.id));
+  const badges: Record<string, string> = {};
+  const rawBadges = (
+    p.badges && typeof p.badges === 'object' && !Array.isArray(p.badges) ? p.badges : {}
+  ) as Record<string, unknown>;
+  for (const id of Object.keys(rawBadges)) {
+    const when = rawBadges[id];
+    if (known.has(id) && typeof when === 'string') badges[id] = when;
   }
   return {
     version: 1,
-    xp: typeof p.xp === 'number' ? p.xp : 0,
-    badges: p.badges && typeof p.badges === 'object' ? p.badges : {},
+    xp: count(p.xp),
+    badges,
     stats,
-    totals: { ...empty.totals, ...(p.totals ?? {}) },
-    daily: p.daily && typeof p.daily === 'object' ? p.daily : {},
-    bestStreak: typeof p.bestStreak === 'number' ? p.bestStreak : 0,
-    freezes: typeof p.freezes === 'number' ? p.freezes : 0,
-    frozenDays: p.frozenDays && typeof p.frozenDays === 'object' ? p.frozenDays : {},
+    totals,
+    daily,
+    bestStreak: count(p.bestStreak),
+    freezes: Math.min(MAX_FREEZES, count(p.freezes)),
+    frozenDays,
     lastFreezeGrant: typeof p.lastFreezeGrant === 'string' ? p.lastFreezeGrant : null,
   };
 }
@@ -524,7 +638,10 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
     },
   };
 
-  if (state.mode === 'daily' && state.dailyKey && !next.daily[state.dailyKey]) {
+  // A daily is filed under its day, so a game carrying anything else is not
+  // filed at all: the map is walked a day at a time, and a key that cannot be
+  // stepped back from would be walked for ever.
+  if (state.mode === 'daily' && isDateKey(state.dailyKey) && !next.daily[state.dailyKey]) {
     const result: DailyResult = {
       key: state.dailyKey,
       difficulty,
@@ -544,7 +661,11 @@ export function recordGameWin(profile: Profile, state: GameState, now: Date): Wi
     };
   }
 
-  const streak = currentStreak(next.daily, state.dailyKey ?? dateKey(now), next.frozenDays);
+  const streak = currentStreak(
+    next.daily,
+    isDateKey(state.dailyKey) ? state.dailyKey : dateKey(now),
+    next.frozenDays,
+  );
   next = { ...next, bestStreak: Math.max(next.bestStreak, streak) };
 
   const ctx: WinContext = { state, profile: next, streak, clean };
