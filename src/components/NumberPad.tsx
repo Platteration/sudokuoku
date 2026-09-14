@@ -79,6 +79,7 @@ const makeStyles = (colors: Colors) =>
       backgroundColor: colors.surface,
       alignItems: 'center',
       borderWidth: 1,
+      borderBottomWidth: 3,
       borderColor: colors.line,
     },
     keyNotes: {
