@@ -9,6 +9,12 @@ const PROFILE_KEY = 'sudokuoku:profile:v1';
 const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
 const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
 
+function safeParse<T>(text: string): T {
+  return JSON.parse(text, (key, value) => {
+    return key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : value;
+  }) as T;
+}
+
 function looksLikeState(x: unknown): x is GameState {
   if (!x || typeof x !== 'object') return false;
   const s = x as Partial<GameState>;
@@ -53,7 +59,7 @@ async function loadState(key: string): Promise<GameState | null> {
   try {
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { state?: unknown; elapsed?: number };
+    const parsed = safeParse<{ state?: unknown; elapsed?: number }>(raw);
     // Older saves wrapped the state as { state, elapsed }.
     const candidate = looksLikeState(parsed) ? parsed : parsed.state;
     if (!looksLikeState(candidate)) return null;
@@ -117,11 +123,11 @@ export async function clearDailyGame(): Promise<void> {
 export async function loadProfile(): Promise<Profile> {
   try {
     const raw = await AsyncStorage.getItem(PROFILE_KEY);
-    if (raw) return normalizeProfile(JSON.parse(raw));
+    if (raw) return normalizeProfile(safeParse(raw));
     // One-time migration from the older stats-only store.
     const legacy = await AsyncStorage.getItem(LEGACY_STATS_KEY);
     if (legacy) {
-      const profile = normalizeProfile({ stats: JSON.parse(legacy) });
+      const profile = normalizeProfile({ stats: safeParse(legacy) });
       await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
       await AsyncStorage.removeItem(LEGACY_STATS_KEY);
       return profile;
