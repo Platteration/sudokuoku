@@ -224,6 +224,8 @@ function GameView({
   const [showDaily, setShowDaily] = useState(false);
   const [showChallenge, setShowChallenge] = useState(false);
 
+  const MAX_CODE_LENGTH = 16384;
+
   /** The games that are not on screen, one slot per mode. */
   const parked = useRef<Partial<Record<GameMode, GameState>>>({
     daily: initial.daily ?? undefined,
@@ -462,15 +464,27 @@ function GameView({
   // sudokuoku://c/<code> or https://<host>/c/<code>.
   const openChallengeRef = useRef(openChallenge);
   openChallengeRef.current = openChallenge;
+
+  const getChallengeCode = (url: string): string | null => {
+    const match = /\/c\/([^/?#]+)/.exec(url);
+    if (!match) return null;
+    const rawCode = match[1];
+    if (!rawCode || rawCode.length > MAX_CODE_LENGTH) return null;
+    try {
+      const decoded = decodeURIComponent(rawCode);
+      return decoded.length <= MAX_CODE_LENGTH ? decoded : null;
+    } catch {
+      return rawCode.length <= MAX_CODE_LENGTH ? rawCode : null;
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
     const handle = (url: string | null) => {
       if (!url || cancelled) return;
-      const marker = '/c/';
-      const at = url.indexOf(marker);
-      if (at < 0) return;
-      const code = url.slice(at + marker.length).split(/[?#]/)[0];
+      const code = getChallengeCode(url);
+      if (!code) return;
       const result = decodeChallenge(code);
       if (result.ok) {
         openChallengeRef.current(result.challenge);

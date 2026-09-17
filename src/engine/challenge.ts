@@ -162,6 +162,7 @@ function checksum(bytes: Uint8Array): number {
 
 const MAX_GAP_SECONDS = 255;
 const MAX_MOVES = 1023;
+const MAX_BYTES = 16384;
 
 export function encodeChallenge(challenge: Challenge): string {
   const w = new BitWriter();
@@ -212,7 +213,9 @@ export function encodeChallenge(challenge: Challenge): string {
 
 export function decodeChallenge(text: string): DecodeResult {
   const bytes = fromBase64url(text);
-  if (!bytes || bytes.length < 8) return { ok: false, error: 'That code is not complete.' };
+  if (!bytes || bytes.length < 8 || bytes.length > MAX_BYTES) {
+    return { ok: false, error: 'That code is not complete.' };
+  }
 
   const body = bytes.subarray(0, bytes.length - 1);
   if (checksum(body) !== bytes[bytes.length - 1]) {
@@ -233,7 +236,11 @@ export function decodeChallenge(text: string): DecodeResult {
   }
 
   const seed = r.read(32) >>> 0;
-  const difficulty = DIFFICULTIES[r.read(2)];
+  const difficultyIndex = r.read(2);
+  if (difficultyIndex >= DIFFICULTIES.length) {
+    return { ok: false, error: 'That challenge uses an unknown difficulty.' };
+  }
+  const difficulty = DIFFICULTIES[difficultyIndex];
 
   const shiftMask = r.read(8);
   const enabledShifts: ShiftKind[] = ALL_SHIFT_KINDS.filter((_, i) => shiftMask & (1 << i));
@@ -249,6 +256,9 @@ export function decodeChallenge(text: string): DecodeResult {
   let ghost: GhostRun | undefined;
   if (r.read(1) === 1) {
     const count = r.read(10);
+    if (count > MAX_MOVES) {
+      return { ok: false, error: 'That challenge has too many moves.' };
+    }
     const totalSeconds = r.read(16);
     const hints = r.read(8);
     const moves: MoveRecord[] = [];

@@ -47,6 +47,22 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
   const [pasted, setPasted] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const MAX_CHALLENGE_CODE_LENGTH = 24000;
+
+  const parseChallengeInput = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    const fromQuery = /[?&#]code=([^&#]+)/.exec(trimmed);
+    if (fromQuery) {
+      try {
+        return decodeURIComponent(fromQuery[1]);
+      } catch {
+        return fromQuery[1];
+      }
+    }
+    const afterSlash = trimmed.lastIndexOf('/') >= 0 ? trimmed.slice(trimmed.lastIndexOf('/') + 1) : trimmed;
+    return afterSlash.replace(/[?#].*$/, '');
+  };
 
   // A finished game can carry the solve as a ghost to race against.
   const canSendGhost = state.status === 'won' && state.log.length > 0;
@@ -68,11 +84,13 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
   };
 
   const open = (raw: string) => {
-    const trimmed = raw.trim();
+    const trimmed = parseChallengeInput(raw);
     if (!trimmed) return;
-    // Accept a bare code or a full link, since people paste both.
-    const cleaned = trimmed.includes('/') ? trimmed.slice(trimmed.lastIndexOf('/') + 1) : trimmed;
-    const result = decodeChallenge(cleaned);
+    if (trimmed.length > MAX_CHALLENGE_CODE_LENGTH) {
+      setError('That challenge code is too long to open safely.');
+      return;
+    }
+    const result = decodeChallenge(trimmed);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -151,6 +169,7 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
         autoCapitalize="none"
         autoCorrect={false}
         multiline
+        maxLength={MAX_CHALLENGE_CODE_LENGTH}
         style={styles.input}
         accessibilityLabel="Challenge code"
       />
