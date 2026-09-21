@@ -3,7 +3,6 @@ import {
   CELLS,
   Difficulty,
   Grid,
-  findConflicts,
   generatePuzzle,
   isComplete,
 } from './sudoku';
@@ -555,8 +554,6 @@ export function mistakes(state: GameState): Set<number> {
   return out;
 }
 
-export { findConflicts };
-
 /** How many of each digit remain to be placed. */
 export function remainingCounts(state: GameState): number[] {
   const counts = new Array<number>(10).fill(9);
@@ -564,5 +561,3 @@ export function remainingCounts(state: GameState): number[] {
   for (const v of state.values) if (v !== 0) counts[v]--;
   return counts;
 }
-
-export type { Difficulty, ShiftKind };

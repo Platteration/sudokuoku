@@ -19,6 +19,9 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~57.0.2",
+    "globals": "^16.0.0",
     "typescript": "~6.0.3",
     "vitest": "^3.2.7"
   },
@@ -29,9 +32,10 @@
     "web": "expo start --web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:conventions": "node --test test/conventions.mjs",
-    "check": "npm run typecheck && npm test && npm run test:conventions"
+    "check": "npm run lint && npm run typecheck && npm test && npm run test:conventions"
   },
   "private": true,
   "description": "Sudoku that shifts under you after every move, and stays solvable.",

@@ -35,6 +35,7 @@ contrast pack and a reduce motion switch are in Settings.
 ## Development
 
 ```bash
+npm run lint              # eslint (the shared Expo preset, eslint.config.js)
 npm run typecheck         # tsc --noEmit
 npm test                  # vitest: generator, solver, every shift, phantoms, the game reducer
 npm run test:conventions  # the shared repository conventions (CONVENTIONS.md)
