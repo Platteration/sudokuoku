@@ -18,17 +18,34 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "allowBackup": true,
+      "blockedPermissions": [
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
       "package": "com.platteration.sudokuoku"
     },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#f4f5f9"
+        }
+      ],
+      "./plugins/withDebugInternet"
+    ],
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
-    "description": "Sudoku that shifts under you after every move, and stays solvable.",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f4f5f9"
-    }
+    "description": "Sudoku that shifts under you after every move, and stays solvable."
   }
 }
