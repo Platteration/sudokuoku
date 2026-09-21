@@ -32,12 +32,13 @@ for 3 more moves"), and each shift and each fading digit is announced through
 `AccessibilityInfo`, so the movement is not silent. A colourblind-safe High
 contrast pack and a reduce motion switch are in Settings.
 
-## Checks
+## Development
 
 ```bash
-npm run typecheck  # tsc --noEmit
-npm test           # vitest: generator, solver, every shift, phantoms, the game reducer
-npm run check      # both
+npm run typecheck         # tsc --noEmit
+npm test                  # vitest: generator, solver, every shift, phantoms, the game reducer
+npm run test:conventions  # the shared repository conventions (CONVENTIONS.md)
+npm run check             # all of the above: the gate before a push
 ```
 
 GitHub Actions runs the same checks plus an Android and web Metro bundle on
@@ -171,7 +172,7 @@ the free game, the daily in progress, the profile with statistics, XP, badges,
 streak freezes and daily history, and the appearance and assistance
 preferences, which belong to the player rather than to either game.
 
-## Code layout
+## Project layout
 
 ```
 App.tsx                     entry: safe-area provider + game screen
