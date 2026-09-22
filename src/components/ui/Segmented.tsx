@@ -36,6 +36,10 @@ export default function Segmented<T extends string | number>({
             scaleTo={0.97}
             accessibilityRole="radio"
             accessibilityState={{ selected: active, checked: active }}
+            // react-native-web maps no accessibilityState at all, so without
+            // this the option is a radio a screen reader reads as "not
+            // checked" — the current one included. Native reads either.
+            aria-checked={active}
             accessibilityLabel={label(option)}
             style={[styles.segment, active && [styles.segmentActive, shadow(1, dark)]]}
           >

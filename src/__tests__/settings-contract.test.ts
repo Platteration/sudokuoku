@@ -122,3 +122,40 @@ describe('the About card', () => {
     expect(appVersion(42)).toBe('0.0.0');
   });
 });
+
+/**
+ * The other half of the contract lives in the components, and there is no
+ * renderer in this repository to put it in front of: the screens are read as
+ * text instead. What a screen reader is told on the web build is the case in
+ * point — react-native-web maps no accessibilityState at all, so a control
+ * that says nothing beside it says nothing at all, and every test here ran
+ * green while it did.
+ */
+describe('the screens', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
+
+  it('says which choice is the current one, on the web as well as on a device', () => {
+    // The aria prop beside accessibilityState is the whole of what a browser
+    // is told: an option with a role and no state is announced as "not
+    // checked", the current one included.
+    const segmented = read('src/components/ui/Segmented.tsx');
+    expect(segmented).toMatch(/accessibilityRole="radiogroup" accessibilityLabel=\{title\}/);
+    expect(segmented).toMatch(/accessibilityRole="radio"/);
+    expect(segmented).toMatch(/accessibilityState=\{\{ selected: active, checked: active \}\}/);
+    expect(segmented).toMatch(/aria-checked=\{active\}/);
+    const sheet = read('src/components/SettingsSheet.tsx');
+    expect(sheet).toMatch(/accessibilityRole="switch"/);
+    expect(sheet).toMatch(/aria-checked=\{value\}/);
+    expect((sheet.match(/aria-selected=\{active\}/g) ?? []).length).toBe(2); // presets, packs
+  });
+
+  it('hands the source link to the browser as a link on the web, and to the OS on a device', () => {
+    // react-native-web renders `href` as an <a>; without one the About link
+    // exports as a <div role="link"> with nowhere to go.
+    const sheet = read('src/components/SettingsSheet.tsx');
+    expect(sheet).toMatch(/Platform\.OS === 'web'\n\s*\? \{ href: SOURCE_URL, hrefAttrs: \{ target: '_blank', rel: 'noreferrer' \} \}/);
+    expect(sheet).toMatch(/Linking\.openURL\(SOURCE_URL\)/);
+    expect(sheet).toMatch(/accessibilityRole="link"/);
+  });
+});

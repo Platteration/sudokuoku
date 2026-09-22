@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import React, { useState } from 'react';
-import { Linking, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Platform, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   ALL_SHIFT_KINDS,
   Difficulty,
@@ -57,6 +57,23 @@ const TARGET_LABEL: Record<PhantomTarget, string> = {
   both: 'Both',
 };
 
+/**
+ * What makes the source link a link on the web. react-native-web renders a
+ * `href` as an `<a>`; without one the export is a `<div role="link">` with no
+ * destination, so the browser offers no open-in-a-new-tab, no status bar and
+ * nothing the keyboard can follow. The anchor navigates by itself and
+ * react-native-web's click handler does not prevent that default, so the press
+ * handler is native-only: both would open the page twice.
+ */
+const WEB_LINK: object | null =
+  Platform.OS === 'web'
+    ? { href: SOURCE_URL, hrefAttrs: { target: '_blank', rel: 'noreferrer' } }
+    : null;
+
+const openSource = () => {
+  Linking.openURL(SOURCE_URL).catch(() => undefined);
+};
+
 function Row({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
   const styles = useStyles(makeStyles);
   const { colors } = useTheme();
@@ -67,6 +84,9 @@ function Row({ label, hint, value, onChange }: { label: string; hint?: string; v
       accessibilityRole="switch"
       accessibilityLabel={label}
       accessibilityState={{ checked: value }}
+      // The web build reads none of that state (react-native-web maps no
+      // accessibilityState), so the switch says on or off through aria too.
+      aria-checked={value}
       style={[styles.row, value && styles.rowOn]}
     >
       <View style={{ flex: 1 }}>
@@ -158,6 +178,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
               accessibilityRole="button"
               accessibilityLabel={preset.name}
               accessibilityState={{ selected: active }}
+              aria-selected={active}
               style={[styles.preset, active && styles.presetActive]}
             >
               <View style={styles.presetIcon}>
@@ -293,6 +314,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
               accessibilityRole="button"
               accessibilityLabel={pack.name}
               accessibilityState={{ selected: active }}
+              aria-selected={active}
               style={styles.pack}
             >
               <View style={[styles.swatchRow, active && styles.swatchRowActive]}>
@@ -386,9 +408,8 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         <Text style={styles.aboutText}>{TAGLINE}</Text>
         <Text style={styles.aboutText}>{PRIVACY}</Text>
         <Press
-          onPress={() => {
-            Linking.openURL(SOURCE_URL).catch(() => undefined);
-          }}
+          onPress={WEB_LINK === null ? openSource : undefined}
+          {...(WEB_LINK ?? {})}
           accessibilityRole="link"
           accessibilityLabel={`${LICENCE} and source code`}
           hitSlop={6}
