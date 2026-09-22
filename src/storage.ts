@@ -127,11 +127,12 @@ function parse(raw: string): unknown {
  * The fold follows the shared migration shape: when the record already
  * carries the flag the old key is only deleted, otherwise the old value is
  * written into the record and the old key removed only once that write has
- * succeeded, so a failed write is retried on the next launch. A record that is
- * not JSON is left exactly as it is — it is still the player's only copy — and
- * the old flag is read without being moved. A failing store reports the
- * introduction as seen, so a device that cannot persist is not asked to read
- * it on every launch.
+ * succeeded, so a failed write is retried on the next launch. The fold itself
+ * never writes over a record that is not JSON: the flag is read from the old
+ * key without being moved, and the record is left to the app's own next
+ * settings write, which carries the flag from then on. A store that cannot be
+ * read at all answers `seenIntro: null`, an unknown the screen treats as
+ * "closed for this launch" and never writes back (see `SharedRecord`).
  */
 export async function loadSharedSettings(): Promise<SharedRecord> {
   try {
@@ -155,19 +156,33 @@ export async function loadSharedSettings(): Promise<SharedRecord> {
     }
     return { ...record, seenIntro };
   } catch {
-    return { settings: {}, seenIntro: true };
+    return { settings: {}, seenIntro: null };
   }
 }
 
+/**
+ * Writes the shared settings. The intro flag is written only when it is
+ * known; when this launch could not read it, whatever the record already
+ * holds is kept, so a read that failed once cannot turn into a flag the
+ * player never set.
+ */
 export async function saveSharedSettings(record: SharedRecord): Promise<void> {
   try {
+    const seenIntro = record.seenIntro ?? (await storedIntroFlag());
     await AsyncStorage.setItem(
       KEYS.settings,
-      JSON.stringify({ ...record.settings, seenIntro: record.seenIntro }),
+      JSON.stringify(seenIntro === undefined ? record.settings : { ...record.settings, seenIntro }),
     );
   } catch {
     // best-effort
   }
+}
+
+/** The flag the record holds right now, when it holds one as a boolean. */
+async function storedIntroFlag(): Promise<boolean | undefined> {
+  const raw = await AsyncStorage.getItem(KEYS.settings);
+  const flag = raw === null ? undefined : fields(parse(raw)).seenIntro;
+  return typeof flag === 'boolean' ? flag : undefined;
 }
 
 async function remove(key: string): Promise<void> {

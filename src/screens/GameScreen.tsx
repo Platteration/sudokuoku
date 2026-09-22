@@ -75,8 +75,12 @@ interface Loaded {
   free: GameState;
   daily: GameState | null;
   profile: Profile;
-  /** Whether the introduction has been read; it opens by itself until it has. */
-  seenIntro: boolean;
+  /**
+   * Whether the introduction has been read; it opens by itself until it has.
+   * Null when the store could not be read: it stays closed for this launch,
+   * and nothing about it is written until the player closes it.
+   */
+  seenIntro: boolean | null;
 }
 
 export default function GameScreen() {
@@ -175,8 +179,8 @@ function GameView({
   const [profile, setProfile] = useState<Profile>(initial.profile);
   const [outcome, setOutcome] = useState<WinOutcome | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showHelp, setShowHelp] = useState(!initial.seenIntro);
-  const [seenIntro, setSeenIntro] = useState(initial.seenIntro);
+  const [showHelp, setShowHelp] = useState(initial.seenIntro === false);
+  const [seenIntro, setSeenIntro] = useState<boolean | null>(initial.seenIntro);
   const [showWin, setShowWin] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [showDaily, setShowDaily] = useState(false);
@@ -237,7 +241,8 @@ function GameView({
   }, [state.elapsed]);
   // The shared settings are kept outside both games, so a change made while
   // the daily is on screen still survives a restart and a switch. The intro
-  // flag travels in the same record, so it is written from here as well.
+  // flag travels in the same record, so it is written from here as well —
+  // once it is known; an unknown one leaves the record's own flag in place.
   useEffect(() => {
     saveSharedSettings({ settings: pickShared(state.settings), seenIntro });
   }, [state.settings, seenIntro]);

@@ -199,9 +199,10 @@ describe('the shared settings record', () => {
     expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ ...shared, seenIntro: true });
   });
 
-  it('does not overwrite a record it cannot read', async () => {
-    // Not JSON: still the player's only copy of it. The flag is read from the
-    // old key, which stays until the app's own next write repairs the record.
+  it('leaves a record it cannot read to the app\u2019s own next write', async () => {
+    // Not JSON: the fold writes nothing over it. The flag is read from the
+    // old key, which stays until the app's next settings write carries the
+    // flag and so repairs the record.
     store.set(SETTINGS_KEY, '{not json');
     store.set(HELP_SEEN_KEY, '1');
     expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: true });
@@ -219,12 +220,30 @@ describe('the shared settings record', () => {
     expect(store).toEqual(snapshot);
   });
 
-  it('does not nag on every launch when there is no store at all', async () => {
+  it('answers unknown when the store cannot be read, and never writes that down', async () => {
+    // The screen keeps the intro closed on an unknown flag, so a device that
+    // cannot persist is not asked to read it every launch — but the mount
+    // write that follows must not turn one failed read into a flag the
+    // player never set, or the first-run help is gone for good.
     fault.all = true;
-    expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: true });
-    // ...and a store with nothing in it shows the intro once.
+    expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: null });
     fault.all = false;
+    await saveSharedSettings({ settings: { theme: 'dark' }, seenIntro: null });
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ theme: 'dark' });
+    // The next launch that can read shows the intro, as a first launch does.
+    expect(await loadSharedSettings()).toEqual({ settings: { theme: 'dark' }, seenIntro: false });
+    // ...and a store with nothing in it shows the intro once.
+    store.clear();
     expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: false });
+  });
+
+  it('keeps a stored flag through a launch that could not read it', async () => {
+    store.set(SETTINGS_KEY, JSON.stringify({ ...shared, seenIntro: true }));
+    await saveSharedSettings({ settings: { theme: 'light' }, seenIntro: null });
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ theme: 'light', seenIntro: true });
+    // A flag that is known is written as itself, over whatever was there.
+    await saveSharedSettings({ settings: { theme: 'light' }, seenIntro: false });
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ theme: 'light', seenIntro: false });
   });
 
   it('is the only record a settings write touches, and carries the flag', async () => {

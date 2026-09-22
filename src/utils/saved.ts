@@ -178,10 +178,17 @@ export type SharedSettings = Partial<Pick<Settings, SharedSettingKey>>;
  * whether the player has seen the introduction. The flag rides with the
  * settings because it is one more thing that belongs to the player rather
  * than to a game, but it is not a preference: a reset leaves it alone.
+ *
+ * `seenIntro` is `null` when the store could not be read this launch. The
+ * screen keeps the introduction closed on it, so a device that cannot persist
+ * is not asked to read it every launch, and it is never written: only a
+ * boolean that was read back, or set by closing the introduction, reaches the
+ * record. Written, one transient read failure would hide the first-run help
+ * for good.
  */
 export interface SharedRecord {
   settings: SharedSettings;
-  seenIntro: boolean;
+  seenIntro: boolean | null;
 }
 
 /** The player-level settings of a game, for storing or copying across. */

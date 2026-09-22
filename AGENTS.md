@@ -29,7 +29,9 @@ grandfathered, a rename for spelling would migrate every player for nothing. The
 own preferences (`SHARED_SETTING_KEYS` in `src/utils/saved.ts`: appearance, colour pack,
 reduce motion, vibration, assistance) live in `sudokuoku:settings:v1` beside `seenIntro`,
 which `loadSharedSettings` folds in from the old `helpSeen` key once; the game rules stay
-in each game's own save. `src/utils/saved.ts` is the validator: enum tables are
+in each game's own save. A launch that cannot read the record at all answers `seenIntro:
+null`: the introduction stays shut for that launch and an unknown flag is never written,
+because one transient read failure written down would hide the first-run help for good. `src/utils/saved.ts` is the validator: enum tables are
 `Record<Union, true>` typed against `Settings`, lookups are own-property only, and the
 boolean `reduceMotion` older builds stored is read there (`true` → `'on'`, `false` →
 `'system'`). Reduce motion is three-way and `useReduceMotion` in `src/motion.ts` resolves
