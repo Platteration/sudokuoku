@@ -123,7 +123,7 @@ export default function DailySheet(p: Props) {
                   isToday && !done && styles.dotToday,
                 ]}
               >
-                <Text style={[styles.dotText, done && styles.dotTextDone]}>
+                <Text style={[styles.dotText, frozen && styles.dotTextFrozen, done && styles.dotTextDone]}>
                   {done ? '✓' : frozen ? '❄' : ''}
                 </Text>
               </View>
@@ -268,8 +268,13 @@ const makeStyles = (colors: Colors) =>
       color: colors.textMuted,
       fontWeight: '700',
     },
+    dotTextFrozen: {
+      color: colors.primary,
+    },
     dotTextDone: {
-      color: '#fff',
+      // The done dot is filled with `success`, which is a light green in the
+      // dark packs: the colour drawn on `primary` is the one that reads on it.
+      color: colors.onPrimary,
     },
     dayLetter: {
       marginTop: 4,

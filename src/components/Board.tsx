@@ -400,6 +400,8 @@ const makeStyles = (colors: Colors) =>
   },
   note: {
     textAlign: 'center',
-    color: colors.textMuted,
+    // Pencil marks are a quarter of a cell tall and sit on every highlight
+    // the board draws; the muted tone cannot reach 4.5:1 on a selected cell.
+    color: colors.text,
   },
   });

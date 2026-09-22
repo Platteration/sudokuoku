@@ -25,7 +25,7 @@ interface ButtonProps {
 function ControlButton({ label, icon, active, disabled, onPress }: ButtonProps) {
   const styles = useStyles(makeStyles);
   const { colors, dark } = useTheme();
-  const fg = disabled ? colors.textMuted : active ? colors.onPrimary : colors.text;
+  const fg = disabled ? colors.textMuted : active ? colors.onAccent : colors.text;
   return (
     <Press
       onPress={onPress}
@@ -41,7 +41,7 @@ function ControlButton({ label, icon, active, disabled, onPress }: ButtonProps) 
       ]}
     >
       <Icon name={icon} size={21} color={fg} />
-      <Text style={[styles.label, { color: active ? colors.onPrimary : colors.textMuted }]}>
+      <Text style={[styles.label, { color: active ? colors.onAccent : colors.textMuted }]}>
         {label}
       </Text>
       {active ? <View style={styles.activeDot} /> : null}
@@ -103,6 +103,6 @@ const makeStyles = (colors: Colors) =>
       width: 5,
       height: 5,
       borderRadius: 3,
-      backgroundColor: colors.onPrimary,
+      backgroundColor: colors.onAccent,
     },
   });
