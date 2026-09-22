@@ -27,7 +27,6 @@ export const lightColors = {
   onPrimary: '#ffffff',
   accent: '#f59f00',
   accentSoft: '#fff3bf',
-  /** Text and icons drawn on the accent, which is light in some packs and dark in others. */
   danger: '#c11d1d',
   dangerSoft: '#ffe3e3',
   success: '#15842a',
@@ -46,6 +45,7 @@ export const lightColors = {
   onBanner: '#ffffff',
   onBannerMuted: '#c7cad3',
   backdrop: 'rgba(0,0,0,0.45)',
+  /** Text and icons drawn on the accent, which is light in some packs and dark in others. */
   onAccent: '#1c2130',
 };
 
@@ -131,9 +131,8 @@ export const THEME_PACKS: ThemePack[] = [
       phantom: '#6f624c',
       shiftBanner: '#2b2620',
       onBannerMuted: '#c9bfb0',
-    
       onAccent: '#ffffff',
-}),
+    }),
     dark: dark({
       background: '#1a1713',
       surface: '#241f19',
@@ -155,10 +154,9 @@ export const THEME_PACKS: ThemePack[] = [
       cellPhantom: '#332a20',
       phantom: '#bda67f',
       shiftBanner: '#2c261f',
-    
       danger: '#f97d7d',
       onAccent: '#1a1713',
-}),
+    }),
   },
   {
     id: 'terminal',
@@ -185,9 +183,8 @@ export const THEME_PACKS: ThemePack[] = [
       phantom: '#386f52',
       shiftBanner: '#123018',
       onBannerMuted: '#adc4b0',
-    
       onAccent: '#ffffff',
-}),
+    }),
     dark: dark({
       background: '#050b06',
       surface: '#0c160d',
@@ -212,9 +209,8 @@ export const THEME_PACKS: ThemePack[] = [
       shiftBanner: '#0f1f11',
       onBanner: '#8ef2a4',
       onBannerMuted: '#4f9a63',
-    
       onAccent: '#050b06',
-}),
+    }),
   },
   {
     id: 'blueprint',
@@ -239,9 +235,8 @@ export const THEME_PACKS: ThemePack[] = [
       phantom: '#48688c',
       shiftBanner: '#12314f',
       onBannerMuted: '#adc0d3',
-    
       onAccent: '#12314f',
-}),
+    }),
     dark: dark({
       background: '#0a2038',
       surface: '#103050',
@@ -263,11 +258,10 @@ export const THEME_PACKS: ThemePack[] = [
       cellPhantom: '#1d3f5e',
       phantom: '#a9c8e6',
       shiftBanner: '#153c60',
-    
       danger: '#faa2a2',
       onBannerMuted: '#9da3b2',
       onAccent: '#0a2038',
-}),
+    }),
   },
   {
     id: 'sunset',
@@ -294,9 +288,8 @@ export const THEME_PACKS: ThemePack[] = [
       phantom: '#8b4f97',
       shiftBanner: '#3d2233',
       onBannerMuted: '#cbb0bd',
-    
       onAccent: '#3d2233',
-}),
+    }),
     dark: dark({
       background: '#1b1020',
       surface: '#2a172e',
@@ -318,10 +311,9 @@ export const THEME_PACKS: ThemePack[] = [
       cellPhantom: '#3a2247',
       phantom: '#d3a2e0',
       shiftBanner: '#2f1c35',
-    
       danger: '#f97d7d',
       onAccent: '#1b1020',
-}),
+    }),
   },
   {
     id: 'contrast',
@@ -351,9 +343,8 @@ export const THEME_PACKS: ThemePack[] = [
       phantom: '#5b2d91',
       shiftBanner: '#000000',
       onBannerMuted: '#cccccc',
-    
       onAccent: '#ffffff',
-}),
+    }),
     dark: dark({
       background: '#000000',
       surface: '#101010',
@@ -378,9 +369,8 @@ export const THEME_PACKS: ThemePack[] = [
       cellPhantom: '#33245c',
       phantom: '#c9a8ff',
       shiftBanner: '#151515',
-    
       onAccent: '#000000',
-}),
+    }),
   },
 ];
 
