@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
@@ -64,6 +63,9 @@ import {
   saveProfile,
   saveSharedSettings,
 } from '../storage';
+import { confirmAction } from '../confirm';
+import { haptic, setHapticsEnabled } from '../haptics';
+import { useReduceMotion } from '../motion';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
 import { describeShift } from '../utils/describe';
 import { applyShared, pickShared } from '../utils/saved';
@@ -75,17 +77,6 @@ interface Loaded {
   profile: Profile;
   /** Whether the introduction has been read; it opens by itself until it has. */
   seenIntro: boolean;
-}
-
-function haptic(kind: 'shift' | 'win' | 'tap') {
-  if (Platform.OS === 'web') return;
-  const run =
-    kind === 'shift'
-      ? Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-      : kind === 'win'
-        ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        : Haptics.selectionAsync();
-  run.catch(() => undefined);
 }
 
 export default function GameScreen() {
@@ -251,8 +242,15 @@ function GameView({
     saveSharedSettings({ settings: pickShared(state.settings), seenIntro });
   }, [state.settings, seenIntro]);
 
-  // The preference is three-way; what the animations need is a yes or no.
-  const reduceMotion = state.settings.reduceMotion === 'on';
+  // The preference is three-way; what the animations need is a yes or no,
+  // and 'system' means following the device's own answer as it changes.
+  const reduceMotion = useReduceMotion(state.settings.reduceMotion);
+
+  // Haptics are gated by a module flag so every call site stays a one-liner.
+  // Declared before the effects that fire one, so the flag is right first.
+  useEffect(() => {
+    setHapticsEnabled(state.settings.haptics);
+  }, [state.settings.haptics]);
 
   // Feedback when a shift lands. The board rearranging is invisible to a
   // screen reader, so it is spoken as well as felt.
@@ -561,34 +559,6 @@ function pickFreeRules(settings: Settings): Partial<Settings> {
     phantomLockMoves: settings.phantomLockMoves,
     phantomMax: settings.phantomMax,
   };
-}
-
-/**
- * react-native-web implements Alert as an empty stub, so a confirmation there
- * does nothing at all and the button it guards looks broken. The browser's own
- * dialog stands in on that platform.
- */
-function confirmAction({
-  title,
-  message,
-  cancelLabel,
-  confirmLabel,
-  onConfirm,
-}: {
-  title: string;
-  message: string;
-  cancelLabel: string;
-  confirmLabel: string;
-  onConfirm: () => void;
-}): void {
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) onConfirm();
-    return;
-  }
-  Alert.alert(title, message, [
-    { text: cancelLabel, style: 'cancel' },
-    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
-  ]);
 }
 
 async function shareMessage(message: string): Promise<void> {

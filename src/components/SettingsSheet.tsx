@@ -1,5 +1,6 @@
+import Constants from 'expo-constants';
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   ALL_SHIFT_KINDS,
   Difficulty,
@@ -13,7 +14,10 @@ import {
   ThemePreference,
   matchingPreset,
 } from '../engine';
-import { Colors, THEME_PACKS, radius, shadow, useStyles, useTheme } from '../theme';
+import { APP_NAME, LICENCE, PRIVACY, SOURCE_URL, TAGLINE, appVersion } from '../about';
+import { confirmAction } from '../confirm';
+import { Colors, THEME_PACKS, radius, useStyles, useTheme } from '../theme';
+import { defaultShared } from '../utils/saved';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
 import Icon from './ui/Icon';
@@ -130,6 +134,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
 
       <Text style={styles.section}>Difficulty for the next free game</Text>
       <Segmented
+        title="Difficulty for the next free game"
         options={DIFFICULTIES}
         value={difficulty}
         onChange={setDifficulty}
@@ -174,6 +179,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
 
       <Text style={styles.section}>Shifts per move</Text>
       <Segmented
+        title="Shifts per move"
         options={SHIFTS_PER_MOVE}
         value={settings.shiftsPerMove}
         onChange={(n) => onChange({ shiftsPerMove: n })}
@@ -182,6 +188,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
 
       <Text style={styles.section}>Shift after every … moves</Text>
       <Segmented
+        title="Shift after how many moves"
         options={SHIFT_EVERY}
         value={settings.shiftEvery}
         onChange={(n) => onChange({ shiftEvery: n })}
@@ -214,35 +221,40 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         <>
           <Text style={styles.subsection}>Which cells can fade</Text>
           <Segmented
-            options={PHANTOM_TARGETS}
+            title="Which cells can fade"
+        options={PHANTOM_TARGETS}
             value={settings.phantomTarget}
             onChange={(t) => onChange({ phantomTarget: t })}
             label={(t) => TARGET_LABEL[t]}
           />
           <Text style={styles.subsection}>A cell fades every … moves</Text>
           <Segmented
-            options={PHANTOM_EVERY}
+            title="A cell fades every how many moves"
+        options={PHANTOM_EVERY}
             value={settings.phantomEvery}
             onChange={(n) => onChange({ phantomEvery: n })}
             label={(n) => `${n}`}
           />
           <Text style={styles.subsection}>Locked for … moves</Text>
           <Segmented
-            options={PHANTOM_LOCK}
+            title="Locked for how many moves"
+        options={PHANTOM_LOCK}
             value={settings.phantomLockMoves}
             onChange={(n) => onChange({ phantomLockMoves: n })}
             label={(n) => `${n}`}
           />
           <Text style={styles.subsection}>At most … phantoms at once</Text>
           <Segmented
-            options={PHANTOM_MAX}
+            title="At most how many phantoms at once"
+        options={PHANTOM_MAX}
             value={settings.phantomMax}
             onChange={(n) => onChange({ phantomMax: n })}
             label={(n) => `${n}`}
           />
           <Text style={styles.subsection}>Fade speed</Text>
           <Segmented
-            options={PHANTOM_FADE_MS}
+            title="Fade speed"
+        options={PHANTOM_FADE_MS}
             value={settings.phantomFadeMs}
             onChange={(n) => onChange({ phantomFadeMs: n })}
             label={(n) => (n === 2000 ? 'Fast' : n === 4000 ? 'Normal' : 'Slow')}
@@ -262,6 +274,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
 
       <Text style={styles.section}>Appearance</Text>
       <Segmented
+        title="Appearance"
         options={THEMES}
         value={settings.theme}
         onChange={(t) => onChange({ theme: t })}
@@ -299,6 +312,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
       </View>
       <Text style={styles.subsection}>Reduce motion</Text>
       <Segmented
+        title="Reduce motion"
         options={MOTION}
         value={settings.reduceMotion}
         onChange={(v) => onChange({ reduceMotion: v })}
@@ -312,6 +326,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
       <Text style={styles.section}>Assistance</Text>
       <Text style={styles.subsection}>Warn me what is coming</Text>
       <Segmented
+        title="Warn me what is coming"
         options={PREVIEWS}
         value={settings.shiftPreview}
         onChange={(v) => onChange({ shiftPreview: v })}
@@ -337,6 +352,51 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         value={settings.animateShifts}
         onChange={(v) => onChange({ animateShifts: v })}
       />
+
+      <Text style={styles.section}>Feedback</Text>
+      <Row
+        label="Vibration"
+        hint="A tap when you select a cell, a nudge when the board shifts, a buzz when you win."
+        value={settings.haptics}
+        onChange={(v) => onChange({ haptics: v })}
+      />
+
+      <View style={{ height: 8 }} />
+      <PrimaryButton
+        label="Reset to defaults"
+        variant="secondary"
+        size="md"
+        onPress={() =>
+          confirmAction({
+            title: 'Reset settings to defaults?',
+            message:
+              'Appearance, motion, vibration and assistance go back to how they started. Your games, your progress and the rules of the free game are not touched.',
+            cancelLabel: 'Keep',
+            confirmLabel: 'Reset',
+            onConfirm: () => onChange(defaultShared()),
+          })
+        }
+      />
+
+      <Text style={styles.section}>About</Text>
+      <View style={styles.about}>
+        <Text style={styles.aboutTitle}>
+          {APP_NAME} {appVersion(Constants.expoConfig?.version)}
+        </Text>
+        <Text style={styles.aboutText}>{TAGLINE}</Text>
+        <Text style={styles.aboutText}>{PRIVACY}</Text>
+        <Press
+          onPress={() => {
+            Linking.openURL(SOURCE_URL).catch(() => undefined);
+          }}
+          accessibilityRole="link"
+          accessibilityLabel={`${LICENCE} and source code`}
+          hitSlop={6}
+          style={styles.aboutLink}
+        >
+          <Text style={styles.aboutLinkText}>{LICENCE} · source</Text>
+        </Press>
+      </View>
     </Sheet>
   );
 }
@@ -497,5 +557,33 @@ const makeStyles = (colors: Colors) =>
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  about: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  aboutTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  aboutText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  aboutLink: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+  },
+  aboutLinkText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
   },
   });

@@ -8,6 +8,8 @@ interface Props<T extends string | number> {
   value: T;
   onChange: (value: T) => void;
   label: (value: T) => string;
+  /** What the choice is about, for the group a screen reader announces. */
+  title: string;
 }
 
 /**
@@ -19,11 +21,12 @@ export default function Segmented<T extends string | number>({
   value,
   onChange,
   label,
+  title,
 }: Props<T>) {
   const styles = useStyles(makeStyles);
   const { colors, dark } = useTheme();
   return (
-    <View style={styles.track}>
+    <View style={styles.track} accessibilityRole="radiogroup" accessibilityLabel={title}>
       {options.map((option) => {
         const active = option === value;
         return (
@@ -31,8 +34,8 @@ export default function Segmented<T extends string | number>({
             key={String(option)}
             onPress={() => onChange(option)}
             scaleTo={0.97}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: active, checked: active }}
             accessibilityLabel={label(option)}
             style={[styles.segment, active && [styles.segmentActive, shadow(1, dark)]]}
           >

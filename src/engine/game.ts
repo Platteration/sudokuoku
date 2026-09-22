@@ -46,6 +46,8 @@ export interface Settings {
   themePack: string;
   /** Skip the slide, flash and pop animations: follow the OS, or always, or never. */
   reduceMotion: ReduceMotion;
+  /** A tap on select, a nudge on a shift, a buzz on a win. */
+  haptics: boolean;
   /** Phantom challenge: filled cells fade away and lock for a while. */
   phantomMode: boolean;
   /** Which filled cells may fade. */
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   themePack: 'classic',
   reduceMotion: 'system',
+  haptics: true,
   phantomMode: false,
   phantomTarget: 'both',
   phantomEvery: 3,

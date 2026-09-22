@@ -19,3 +19,27 @@ the player's own record (two game slots and a profile), and a restore is untrust
 that `src/utils/saved.ts` already guards. When adding a native module, run `npm test`:
 the manifest walk fails on any permission the module declares that is neither used nor
 blocked.
+
+## Settings
+
+Preferences follow the shared settings contract (`CONVENTIONS.md`, "User-facing
+settings"), pinned by `src/__tests__/settings-contract.test.ts`. Every stored key is in
+`KEYS`/`LEGACY_KEYS` in `src/storage.ts`, spelled `sudokuoku:<record>:v1` — the colon is
+grandfathered, a rename for spelling would migrate every player for nothing. The player's
+own preferences (`SHARED_SETTING_KEYS` in `src/utils/saved.ts`: appearance, colour pack,
+reduce motion, vibration, assistance) live in `sudokuoku:settings:v1` beside `seenIntro`,
+which `loadSharedSettings` folds in from the old `helpSeen` key once; the game rules stay
+in each game's own save. `src/utils/saved.ts` is the validator: enum tables are
+`Record<Union, true>` typed against `Settings`, lookups are own-property only, and the
+boolean `reduceMotion` older builds stored is read there (`true` → `'on'`, `false` →
+`'system'`). Reduce motion is three-way and `useReduceMotion` in `src/motion.ts` resolves
+`'system'` against the device (a rejected native call or a page without `matchMedia` means
+no preference); vibration is gated by the module flag in `src/haptics.ts`; every
+confirmation goes through `src/confirm.ts`, because react-native-web's `Alert.alert` is a
+no-op. Reset to defaults is confirmed and puts back `SHARED_SETTING_KEYS` only, keeping
+`seenIntro`. The About card's text is in `src/about.ts` and its version comes from
+`expo-constants` (`Constants.expoConfig.version`, so app.json); its source link is the one
+URL in the app, handed to the system browser through `Linking.openURL`, which
+`appConfig.test.ts` pins along with the absence of any network code. The palettes are in
+`src/palette.ts`, free of React Native so `palette.test.ts` can hold every pack to WCAG AA;
+`theme.tsx` re-exports them and resolves a null system scheme to dark.

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { SOURCE_URL } from '../about';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -162,7 +163,9 @@ describe('keys the SDK reads', () => {
 
   it('claims no URL scheme, because nothing here handles one', () => {
     expect(appConfig.scheme).toBeUndefined();
-    expect(appSource()).not.toMatch(/\bLinking\b/);
+    // The About card hands one URL *out* to the system browser; nothing here
+    // listens for a URL coming *in*, which is what a scheme would be for.
+    expect(appSource()).not.toMatch(/getInitialURL|addEventListener\(\s*['"]url['"]|expo-linking|useURL\(/);
   });
 });
 
@@ -252,11 +255,16 @@ describe('Android permissions', () => {
 
   it('has no network code, which is why INTERNET can go', () => {
     // The reason for the block, checked against the source rather than
-    // assumed. 'Share result' hands text to the system share sheet, which
-    // opens no socket of this app's own.
-    expect(appSource()).not.toMatch(
-      /\bfetch\(|axios|XMLHttpRequest|WebSocket|openURL|openBrowserAsync|expo-updates|https?:\/\//
-    );
+    // assumed. 'Share result' hands text to the system share sheet, and the
+    // About card hands the repository URL to the system browser: both are
+    // other processes with their own permission, and neither opens a socket
+    // of this app's own. So the only URL in the source is that one, and the
+    // only thing it is handed to is Linking.openURL.
+    const source = appSource();
+    expect(source).not.toMatch(/\bfetch\(|axios|XMLHttpRequest|WebSocket|openBrowserAsync|expo-updates/);
+    const urls = [...source.matchAll(/https?:\/\/[^\s'"`)]+/g)].map((m) => m[0]);
+    expect([...new Set(urls)]).toEqual([SOURCE_URL]);
+    expect(source.match(/\bopenURL\([^)]*\)/g)).toEqual(['openURL(SOURCE_URL)']);
   });
 
   it('gives a development build the network back, in the debug source set only', async () => {

@@ -167,6 +167,7 @@ export const SHARED_SETTING_KEYS = [
   'reduceMotion',
   'phantomMarkers',
   'phantomFadeMs',
+  'haptics',
 ] as const;
 
 export type SharedSettingKey = (typeof SHARED_SETTING_KEYS)[number];
