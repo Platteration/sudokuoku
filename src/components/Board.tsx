@@ -19,6 +19,8 @@ interface Props {
   state: GameState;
   size: number;
   onSelect: (pos: number) => void;
+  /** The motion preference, already resolved against the system's answer. */
+  reduceMotion?: boolean;
 }
 
 const SHIFT_MS = 420;
@@ -36,7 +38,7 @@ function fadeProgress(ph: Phantom, now: number): number {
  * across shifts, so when the board shifts each token glides from its old
  * spot to its new one.
  */
-export default function Board({ state, size, onSelect }: Props) {
+export default function Board({ state, size, onSelect, reduceMotion = false }: Props) {
   const { colors } = useTheme();
   const styles = useStyles(makeStyles);
   const cell = size / 9;
@@ -47,12 +49,12 @@ export default function Board({ state, size, onSelect }: Props) {
   const lastFlashed = useRef(state.shiftCount);
   const movedTo = useMemo(() => {
     const set = new Set<number>();
-    if (!lastShift || settings.reduceMotion) return set;
+    if (!lastShift || reduceMotion) return set;
     lastShift.dest.forEach((to, from) => {
       if (to !== from) set.add(to);
     });
     return set;
-  }, [lastShift, settings.reduceMotion]);
+  }, [lastShift, reduceMotion]);
   useEffect(() => {
     if (state.shiftCount === lastFlashed.current) return;
     lastFlashed.current = state.shiftCount;
@@ -117,7 +119,7 @@ export default function Board({ state, size, onSelect }: Props) {
     tokens.forEach((token, pos) => {
       const target = { x: colOf(pos) * cell, y: rowOf(pos) * cell };
       const v = positions.current![token];
-      if (tokensChanged && settings.animateShifts && !settings.reduceMotion && !sizeChanged) {
+      if (tokensChanged && settings.animateShifts && !reduceMotion && !sizeChanged) {
         anims.push(
           Animated.timing(v, {
             toValue: target,
@@ -133,7 +135,7 @@ export default function Board({ state, size, onSelect }: Props) {
     prevCell.current = cell;
     prevTokens.current = tokens;
     if (anims.length) Animated.parallel(anims).start();
-  }, [tokens, cell, settings.animateShifts, settings.reduceMotion]);
+  }, [tokens, cell, settings.animateShifts, reduceMotion]);
 
   const conflicts = useMemo(
     () => (settings.highlightConflicts ? findConflicts(values) : new Set<number>()),

@@ -52,20 +52,77 @@ export function forStorage(state: GameState): GameState {
 // ---------------------------------------------------------------------------
 // Settings
 
-const SETTING_VALUES: Partial<Record<keyof Settings, readonly string[]>> = {
-  difficulty: ['easy', 'medium', 'hard', 'expert'],
-  shiftPreview: ['off', 'category', 'exact'],
-  theme: ['system', 'light', 'dark'],
-  phantomTarget: ['entries', 'givens', 'both'],
+type Fields = Record<string, unknown>;
+
+/** The own fields of a stored object; anything that is not an object has none. */
+export function fields(raw: unknown): Fields {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Fields) : {};
+}
+
+/**
+ * True when `value` is one of `table`'s own keys — never an inherited one.
+ * Every name on `Object.prototype` (`constructor`, `__proto__`, `toString`)
+ * is truthy on a plain object table, so `value in table` or a bare
+ * `table[value]` would pass any of them as a valid setting.
+ */
+function has<T extends string>(table: Readonly<Record<T, unknown>>, value: unknown): value is T {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(table, value);
+}
+
+/** `value` when it is one of `table`'s own keys, else `fallback`. */
+export function pick<T extends string>(value: unknown, table: Readonly<Record<T, unknown>>, fallback: T): T {
+  return has(table, value) ? value : fallback;
+}
+
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+/** The settings whose values come from a closed set. */
+export type EnumSettingKey = 'difficulty' | 'shiftPreview' | 'theme' | 'phantomTarget' | 'reduceMotion';
+
+/**
+ * Every value each of those settings may hold. Typed against `Settings`
+ * itself, so a member added to a type without being added here — or dropped
+ * here while a player still has it stored — fails the type check rather than
+ * quietly sending that player back to the default.
+ */
+export const SETTING_VALUES: { readonly [K in EnumSettingKey]: Readonly<Record<Settings[K], true>> } = {
+  difficulty: { easy: true, medium: true, hard: true, expert: true },
+  shiftPreview: { off: true, category: true, exact: true },
+  theme: { system: true, light: true, dark: true },
+  phantomTarget: { entries: true, givens: true, both: true },
+  reduceMotion: { system: true, on: true, off: true },
 };
 
-/** True when `value` may stand in for the default of that setting. */
-function settingOk(key: keyof Settings, value: unknown): boolean {
-  const allowed = SETTING_VALUES[key];
-  if (allowed) return typeof value === 'string' && allowed.includes(value);
+function isEnumSetting(key: keyof Settings): key is EnumSettingKey {
+  return Object.prototype.hasOwnProperty.call(SETTING_VALUES, key);
+}
+
+/**
+ * The stored value of one setting when it may stand in for the default, else
+ * undefined. `enabledShifts` is a list and is rebuilt by its callers.
+ */
+export function settingValue<K extends keyof Settings>(key: K, value: unknown): Settings[K] | undefined {
+  // Reduce motion was a boolean until it learned to follow the system. `true`
+  // was a choice and stays one; `false` was the default nobody chose, so it
+  // becomes the new default rather than `'off'`, which would override an OS
+  // preference the player never asked to override.
+  if (key === 'reduceMotion' && typeof value === 'boolean') value = value ? 'on' : 'system';
+  if (isEnumSetting(key)) {
+    const table = SETTING_VALUES[key] as Readonly<Record<string, true>>;
+    return has(table, value) ? (value as Settings[K]) : undefined;
+  }
   const fallback = DEFAULT_SETTINGS[key];
-  if (typeof fallback === 'number') return typeof value === 'number' && Number.isFinite(value);
-  return typeof value === typeof fallback;
+  if (typeof fallback === 'number') {
+    return typeof value === 'number' && Number.isFinite(value) ? (value as Settings[K]) : undefined;
+  }
+  return typeof value === typeof fallback ? (value as Settings[K]) : undefined;
+}
+
+/** True when `value` may stand in for the default of that setting. */
+export function settingOk(key: keyof Settings, value: unknown): boolean {
+  return settingValue(key, value) !== undefined;
 }
 
 /**
@@ -75,11 +132,12 @@ function settingOk(key: keyof Settings, value: unknown): boolean {
  * the first move of the game throws.
  */
 export function cleanSettings(raw: unknown): Settings {
-  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const src = fields(raw);
   const out = { ...DEFAULT_SETTINGS };
   for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
     if (key === 'enabledShifts') continue;
-    if (settingOk(key, src[key])) (out as Record<string, unknown>)[key] = src[key];
+    const value = settingValue(key, src[key]);
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value;
   }
   const shifts = src.enabledShifts;
   out.enabledShifts = Array.isArray(shifts)
@@ -114,6 +172,17 @@ export const SHARED_SETTING_KEYS = [
 export type SharedSettingKey = (typeof SHARED_SETTING_KEYS)[number];
 export type SharedSettings = Partial<Pick<Settings, SharedSettingKey>>;
 
+/**
+ * The record the shared settings are stored in: the settings themselves and
+ * whether the player has seen the introduction. The flag rides with the
+ * settings because it is one more thing that belongs to the player rather
+ * than to a game, but it is not a preference: a reset leaves it alone.
+ */
+export interface SharedRecord {
+  settings: SharedSettings;
+  seenIntro: boolean;
+}
+
 /** The player-level settings of a game, for storing or copying across. */
 export function pickShared(settings: Settings): SharedSettings {
   const out: Record<string, unknown> = {};
@@ -121,14 +190,35 @@ export function pickShared(settings: Settings): SharedSettings {
   return out as SharedSettings;
 }
 
+/** The shared settings as they started: what a reset puts back. */
+export function defaultShared(): SharedSettings {
+  return pickShared(DEFAULT_SETTINGS);
+}
+
 /** Overlays stored shared settings on a game's own, ignoring anything else. */
 export function applyShared(settings: Settings, raw: unknown): Settings {
-  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const src = fields(raw);
   const out = { ...settings };
   for (const key of SHARED_SETTING_KEYS) {
-    if (settingOk(key, src[key])) (out as Record<string, unknown>)[key] = src[key];
+    const value = settingValue(key, src[key]);
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value;
   }
   return out;
+}
+
+/**
+ * A stored shared record, believed only where it is valid: the settings it
+ * carries that the app knows, and the intro flag when it is a boolean. A
+ * missing flag means the introduction has not been seen.
+ */
+export function cleanSharedRecord(raw: unknown): SharedRecord {
+  const src = fields(raw);
+  const settings: Record<string, unknown> = {};
+  for (const key of SHARED_SETTING_KEYS) {
+    const value = settingValue(key, src[key]);
+    if (value !== undefined) settings[key] = value;
+  }
+  return { settings: settings as SharedSettings, seenIntro: bool(src.seenIntro, false) };
 }
 
 // ---------------------------------------------------------------------------

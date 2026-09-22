@@ -55,12 +55,10 @@ import {
 import {
   clearDailyGame,
   clearProfile,
-  hasSeenHelp,
   loadDailyGame,
   loadGame,
   loadProfile,
   loadSharedSettings,
-  markHelpSeen,
   saveDailyGame,
   saveGame,
   saveProfile,
@@ -75,7 +73,8 @@ interface Loaded {
   free: GameState;
   daily: GameState | null;
   profile: Profile;
-  firstLaunch: boolean;
+  /** Whether the introduction has been read; it opens by itself until it has. */
+  seenIntro: boolean;
 }
 
 function haptic(kind: 'shift' | 'win' | 'tap') {
@@ -98,10 +97,9 @@ export default function GameScreen() {
       loadGame(),
       loadDailyGame(),
       loadProfile(),
-      hasSeenHelp(),
       loadSharedSettings(),
     ]).then(
-      ([savedFree, savedDaily, loadedProfile, seenHelp, shared]) => {
+      ([savedFree, savedDaily, loadedProfile, shared]) => {
         if (cancelled) return;
         // Grant the monthly freeze and spend one if a missed day can be saved.
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
@@ -128,9 +126,9 @@ export default function GameScreen() {
         }
         // Appearance and assistance are the player's, not the game's: they
         // are stored on their own and overlaid on whichever game is restored.
-        free = { ...free, settings: applyShared(free.settings, shared) };
-        if (daily) daily = { ...daily, settings: applyShared(daily.settings, shared) };
-        setLoaded({ free, daily, profile, firstLaunch: !seenHelp });
+        free = { ...free, settings: applyShared(free.settings, shared.settings) };
+        if (daily) daily = { ...daily, settings: applyShared(daily.settings, shared.settings) };
+        setLoaded({ free, daily, profile, seenIntro: shared.seenIntro });
       },
     );
     return () => {
@@ -186,7 +184,8 @@ function GameView({
   const [profile, setProfile] = useState<Profile>(initial.profile);
   const [outcome, setOutcome] = useState<WinOutcome | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showHelp, setShowHelp] = useState(initial.firstLaunch);
+  const [showHelp, setShowHelp] = useState(!initial.seenIntro);
+  const [seenIntro, setSeenIntro] = useState(initial.seenIntro);
   const [showWin, setShowWin] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [showDaily, setShowDaily] = useState(false);
@@ -246,10 +245,14 @@ function GameView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.elapsed]);
   // The shared settings are kept outside both games, so a change made while
-  // the daily is on screen still survives a restart and a switch.
+  // the daily is on screen still survives a restart and a switch. The intro
+  // flag travels in the same record, so it is written from here as well.
   useEffect(() => {
-    saveSharedSettings(pickShared(state.settings));
-  }, [state.settings]);
+    saveSharedSettings({ settings: pickShared(state.settings), seenIntro });
+  }, [state.settings, seenIntro]);
+
+  // The preference is three-way; what the animations need is a yes or no.
+  const reduceMotion = state.settings.reduceMotion === 'on';
 
   // Feedback when a shift lands. The board rearranging is invisible to a
   // screen reader, so it is spoken as well as felt.
@@ -389,7 +392,7 @@ function GameView({
 
   const closeHelp = () => {
     setShowHelp(false);
-    markHelpSeen();
+    setSeenIntro(true);
   };
 
   const playing = state.status === 'playing';
@@ -436,7 +439,7 @@ function GameView({
         shift={state.lastShift}
         shiftCount={state.shiftCount}
         moves={state.moves}
-        reduceMotion={state.settings.reduceMotion}
+        reduceMotion={reduceMotion}
         next={state.settings.shiftPreview === 'off' ? [] : nextShifts(state)}
         preview={state.settings.shiftPreview}
       />
@@ -465,6 +468,7 @@ function GameView({
         <Board
           state={state}
           size={boardSize}
+          reduceMotion={reduceMotion}
           onSelect={(pos) => {
             haptic('tap');
             send({ type: 'select', pos });
@@ -500,7 +504,7 @@ function GameView({
         onNewGame={(difficulty) => startNewGame(difficulty)}
         onHelp={() => setShowHelp(true)}
       />
-      <HelpSheet visible={showHelp} reduceMotion={state.settings.reduceMotion} onClose={closeHelp} />
+      <HelpSheet visible={showHelp} reduceMotion={reduceMotion} onClose={closeHelp} />
       <DailySheet
         visible={showDaily}
         todayKey={todayKey}
@@ -538,6 +542,7 @@ function GameView({
         onClose={() => setShowWin(false)}
         onNewGame={() => startNewGame()}
         onShare={isDaily ? shareDaily : undefined}
+        reduceMotion={reduceMotion}
       />
     </View>
   );

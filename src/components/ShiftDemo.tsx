@@ -62,7 +62,7 @@ export default function ShiftDemo({ size, playing, reduceMotion }: Props) {
       ...base,
       values: base.solution.slice(),
       given: base.solution.map(() => true),
-      settings: { ...base.settings, animateShifts: !reduceMotion, reduceMotion: !!reduceMotion },
+      settings: { ...base.settings, animateShifts: !reduceMotion, reduceMotion: reduceMotion ? 'on' : 'off' },
     };
   }, [reduceMotion]);
 
@@ -97,7 +97,7 @@ export default function ShiftDemo({ size, playing, reduceMotion }: Props) {
   return (
     <View style={styles.wrap}>
       <View style={styles.boardWrap}>
-        <Board state={state} size={size} onSelect={() => undefined} />
+        <Board state={state} size={size} onSelect={() => undefined} reduceMotion={reduceMotion} />
       </View>
       <View style={styles.caption}>
         <Text style={styles.captionTitle} numberOfLines={1}>

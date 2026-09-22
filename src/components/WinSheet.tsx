@@ -14,6 +14,7 @@ interface Props {
   onClose: () => void;
   onNewGame: () => void;
   onShare?: () => void;
+  reduceMotion?: boolean;
 }
 
 function Stat({ label, value, styles }: { label: string; value: string; styles: ReturnType<typeof makeStyles> }) {
@@ -25,7 +26,7 @@ function Stat({ label, value, styles }: { label: string; value: string; styles: 
   );
 }
 
-export default function WinSheet({ visible, state, outcome, onClose, onNewGame, onShare }: Props) {
+export default function WinSheet({ visible, state, outcome, onClose, onNewGame, onShare, reduceMotion }: Props) {
   const styles = useStyles(makeStyles);
   const { width } = useWindowDimensions();
   const daily = state.mode === 'daily';
@@ -54,7 +55,7 @@ export default function WinSheet({ visible, state, outcome, onClose, onNewGame, 
         runKey={state.seed}
         width={width}
         active={visible}
-        reduceMotion={state.settings.reduceMotion}
+        reduceMotion={reduceMotion}
       />
       <Text style={styles.lead}>
         {daily

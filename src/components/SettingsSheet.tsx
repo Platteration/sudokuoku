@@ -5,6 +5,7 @@ import {
   Difficulty,
   PRESETS,
   PhantomTarget,
+  ReduceMotion,
   SHIFT_KIND_LABEL,
   Settings,
   ShiftKind,
@@ -39,6 +40,7 @@ const PHANTOM_MAX = [1, 2, 3, 5];
 const PHANTOM_FADE_MS = [2000, 4000, 8000];
 const PHANTOM_TARGETS: PhantomTarget[] = ['entries', 'givens', 'both'];
 const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
+const MOTION: ReduceMotion[] = ['system', 'on', 'off'];
 const PREVIEWS: ShiftPreview[] = ['off', 'category', 'exact'];
 const PREVIEW_LABEL: Record<ShiftPreview, string> = {
   off: 'Off',
@@ -295,13 +297,17 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
           );
         })}
       </View>
-      <View style={{ height: 8 }} />
-      <Row
-        label="Reduce motion"
-        hint="Cells jump straight to their new places, with no sliding, flashing or popping."
+      <Text style={styles.subsection}>Reduce motion</Text>
+      <Segmented
+        options={MOTION}
         value={settings.reduceMotion}
         onChange={(v) => onChange({ reduceMotion: v })}
+        label={(v) => v[0].toUpperCase() + v.slice(1)}
       />
+      <Text style={styles.sectionHint}>
+        On: cells jump straight to their new places, with no sliding, flashing or popping.
+        System follows the reduce-motion setting of your device.
+      </Text>
 
       <Text style={styles.section}>Assistance</Text>
       <Text style={styles.subsection}>Warn me what is coming</Text>

@@ -7,19 +7,40 @@ import { DEFAULT_SETTINGS, GameState, dailyConfig, dailySeed, dailySettings, new
  * believed, so the two have to be watched from outside the module.
  */
 const store = new Map<string, string>();
+/** Faults the store can be put into: a full disk, or no store at all. */
+const fault = { writes: false, all: false };
+const failing = () => {
+  if (fault.all) throw new Error('storage unavailable');
+};
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
-    getItem: async (key: string) => (store.has(key) ? store.get(key)! : null),
+    getItem: async (key: string) => {
+      failing();
+      return store.has(key) ? store.get(key)! : null;
+    },
     setItem: async (key: string, value: string) => {
+      failing();
+      if (fault.writes) throw new Error('quota exceeded');
       store.set(key, value);
     },
     removeItem: async (key: string) => {
+      failing();
       store.delete(key);
     },
   },
 }));
 
-const { clearDailyGame, loadDailyGame, loadGame, saveDailyGame, saveGame } = await import('../storage');
+const {
+  KEYS,
+  LEGACY_KEYS,
+  clearDailyGame,
+  loadDailyGame,
+  loadGame,
+  loadSharedSettings,
+  saveDailyGame,
+  saveGame,
+  saveSharedSettings,
+} = await import('../storage');
 
 /** The records on disk, spelled out: an existing player's games live here. */
 const FREE_KEY = 'sudokuoku:game:v1';
@@ -36,7 +57,11 @@ const dailyGame = (key: string): GameState =>
     dailyKey: key,
   });
 
-beforeEach(() => store.clear());
+beforeEach(() => {
+  store.clear();
+  fault.writes = false;
+  fault.all = false;
+});
 
 describe('which record a game is stored in', () => {
   it('writes each game to its own record and reads it back', async () => {
@@ -109,5 +134,107 @@ describe('which record a game is stored in', () => {
     expect(restored.notes).toHaveLength(81);
     expect(restored.phantoms).toHaveLength(81);
     expect(restored.history).toEqual([]);
+  });
+});
+
+describe('the shared settings record', () => {
+  const SETTINGS_KEY = 'sudokuoku:settings:v1';
+  const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
+  const shared = { theme: 'dark', shiftPreview: 'exact' };
+
+  it('is the key table, spelled out', () => {
+    expect(KEYS.settings).toBe(SETTINGS_KEY);
+    expect(LEGACY_KEYS.helpSeen).toBe(HELP_SEEN_KEY);
+  });
+
+  it('folds the old help-seen flag into the record and removes the old key', async () => {
+    // Old only: the record does not exist yet.
+    store.set(HELP_SEEN_KEY, '1');
+    expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: true });
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ seenIntro: true });
+    expect(store.has(HELP_SEEN_KEY)).toBe(false);
+  });
+
+  it('keeps the settings already in the record while folding the flag in', async () => {
+    store.set(SETTINGS_KEY, JSON.stringify(shared));
+    store.set(HELP_SEEN_KEY, '1');
+    expect(await loadSharedSettings()).toEqual({ settings: shared, seenIntro: true });
+    // Bytes are copied, not judged: the record keeps whatever it held.
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ ...shared, seenIntro: true });
+    expect(store.has(HELP_SEEN_KEY)).toBe(false);
+  });
+
+  it('reads a record that already carries the flag, and nothing else', async () => {
+    // New only.
+    store.set(SETTINGS_KEY, JSON.stringify({ ...shared, seenIntro: true }));
+    expect(await loadSharedSettings()).toEqual({ settings: shared, seenIntro: true });
+    expect([...store.keys()]).toEqual([SETTINGS_KEY]);
+    // A record with the flag unset is one the player has not read the intro through.
+    store.set(SETTINGS_KEY, JSON.stringify({ ...shared, seenIntro: false }));
+    expect((await loadSharedSettings()).seenIntro).toBe(false);
+  });
+
+  it('lets the record win when both exist, and drops the old key', async () => {
+    // Both present can only mean a migrated build could not delete the old
+    // key: the record is what that build has read and written since.
+    store.set(SETTINGS_KEY, JSON.stringify({ ...shared, seenIntro: false }));
+    store.set(HELP_SEEN_KEY, '1');
+    expect((await loadSharedSettings()).seenIntro).toBe(false);
+    expect(store.has(HELP_SEEN_KEY)).toBe(false);
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ ...shared, seenIntro: false });
+  });
+
+  it('leaves the old key in place when the record cannot be written', async () => {
+    store.set(SETTINGS_KEY, JSON.stringify(shared));
+    store.set(HELP_SEEN_KEY, '1');
+    fault.writes = true;
+    // The flag is still answered from the old key this launch...
+    expect(await loadSharedSettings()).toEqual({ settings: shared, seenIntro: true });
+    expect(store.has(HELP_SEEN_KEY)).toBe(true);
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual(shared);
+    // ...and the fold happens on the next launch that can write.
+    fault.writes = false;
+    expect(await loadSharedSettings()).toEqual({ settings: shared, seenIntro: true });
+    expect(store.has(HELP_SEEN_KEY)).toBe(false);
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ ...shared, seenIntro: true });
+  });
+
+  it('does not overwrite a record it cannot read', async () => {
+    // Not JSON: still the player's only copy of it. The flag is read from the
+    // old key, which stays until the app's own next write repairs the record.
+    store.set(SETTINGS_KEY, '{not json');
+    store.set(HELP_SEEN_KEY, '1');
+    expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: true });
+    expect(store.get(SETTINGS_KEY)).toBe('{not json');
+    expect(store.has(HELP_SEEN_KEY)).toBe(true);
+  });
+
+  it('runs twice without changing anything the second time', async () => {
+    store.set(SETTINGS_KEY, JSON.stringify(shared));
+    store.set(HELP_SEEN_KEY, '1');
+    const first = await loadSharedSettings();
+    const snapshot = new Map(store);
+    const second = await loadSharedSettings();
+    expect(second).toEqual(first);
+    expect(store).toEqual(snapshot);
+  });
+
+  it('does not nag on every launch when there is no store at all', async () => {
+    fault.all = true;
+    expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: true });
+    // ...and a store with nothing in it shows the intro once.
+    fault.all = false;
+    expect(await loadSharedSettings()).toEqual({ settings: {}, seenIntro: false });
+  });
+
+  it('is the only record a settings write touches, and carries the flag', async () => {
+    await saveGame(freeGame());
+    await saveDailyGame(dailyGame('2026-09-07'));
+    store.set(KEYS.profile, JSON.stringify({ xp: 10 }));
+    const before = new Map(store);
+    await saveSharedSettings({ settings: { theme: 'dark' }, seenIntro: true });
+    for (const [key, value] of before) expect(store.get(key), key).toBe(value);
+    expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ theme: 'dark', seenIntro: true });
+    expect(await loadSharedSettings()).toEqual({ settings: { theme: 'dark' }, seenIntro: true });
   });
 });

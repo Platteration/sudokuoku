@@ -16,7 +16,7 @@ describe('presets', () => {
       ...DEFAULT_SETTINGS,
       theme: 'dark' as const,
       themePack: 'terminal',
-      reduceMotion: true,
+      reduceMotion: 'on' as const,
       showMistakes: true,
       difficulty: 'expert' as const,
       phantomFadeMs: 2000,
@@ -25,7 +25,7 @@ describe('presets', () => {
       const next = applyPreset(settings, preset);
       expect(next.theme).toBe('dark');
       expect(next.themePack).toBe('terminal');
-      expect(next.reduceMotion).toBe(true);
+      expect(next.reduceMotion).toBe('on');
       expect(next.showMistakes).toBe(true);
       expect(next.difficulty).toBe('expert');
       expect(next.phantomFadeMs).toBe(2000);

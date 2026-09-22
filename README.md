@@ -30,7 +30,7 @@ describe it. Every cell announces its contents as well as its coordinates
 ("Row 3, column 5, 7, given" / "empty, noted 1, 5 and 7" / "faded and locked
 for 3 more moves"), and each shift and each fading digit is announced through
 `AccessibilityInfo`, so the movement is not silent. A colourblind-safe High
-contrast pack and a reduce motion switch are in Settings.
+contrast pack and a Reduce motion control (system, on or off) are in Settings.
 
 ## Development
 

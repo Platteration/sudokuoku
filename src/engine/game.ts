@@ -21,6 +21,8 @@ import { RULE_KEYS } from './presets';
 export type PhantomTarget = 'entries' | 'givens' | 'both';
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ShiftPreview = 'off' | 'category' | 'exact';
+/** Skip the decorative animation: as the system says, always, or never. */
+export type ReduceMotion = 'system' | 'on' | 'off';
 
 export interface Settings {
   difficulty: Difficulty;
@@ -42,8 +44,8 @@ export interface Settings {
   theme: ThemePreference;
   /** Colour pack id, see THEME_PACKS. */
   themePack: string;
-  /** Skip the slide, flash and pop animations. */
-  reduceMotion: boolean;
+  /** Skip the slide, flash and pop animations: follow the OS, or always, or never. */
+  reduceMotion: ReduceMotion;
   /** Phantom challenge: filled cells fade away and lock for a while. */
   phantomMode: boolean;
   /** Which filled cells may fade. */
@@ -71,7 +73,7 @@ export const DEFAULT_SETTINGS: Settings = {
   animateShifts: true,
   theme: 'system',
   themePack: 'classic',
-  reduceMotion: false,
+  reduceMotion: 'system',
   phantomMode: false,
   phantomTarget: 'both',
   phantomEvery: 3,

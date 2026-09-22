@@ -16,10 +16,14 @@ import {
   xpForWin,
 } from '../../engine';
 import {
+  EnumSettingKey,
   PERSISTED_HISTORY,
+  SETTING_VALUES,
   SHARED_SETTING_KEYS,
   applyShared,
   cleanSettings,
+  cleanSharedRecord,
+  defaultShared,
   forStorage,
   pickShared,
   readSavedGame,
@@ -203,8 +207,57 @@ describe('settings from a save', () => {
       phantomFadeMs: 1500,
       themePack: 'terminal',
       showMistakes: true,
+      reduceMotion: 'off',
     };
     expect(cleanSettings(mine)).toEqual(mine);
+  });
+
+  const ENUM_KEYS = Object.keys(SETTING_VALUES) as EnumSettingKey[];
+
+  it('round-trips the defaults and every value each setting may hold', () => {
+    // A member dropped from a table would send every player who chose it
+    // back to the default, silently. Each table is typed against Settings so
+    // that fails to compile; this is the same guard at run time.
+    expect(cleanSettings(DEFAULT_SETTINGS)).toEqual(DEFAULT_SETTINGS);
+    expect(applyShared(DEFAULT_SETTINGS, DEFAULT_SETTINGS)).toEqual(DEFAULT_SETTINGS);
+    for (const key of ENUM_KEYS) {
+      for (const value of Object.keys(SETTING_VALUES[key])) {
+        expect(cleanSettings({ [key]: value })[key], `${key}=${value}`).toBe(value);
+      }
+    }
+    expect(ENUM_KEYS.sort()).toEqual(['difficulty', 'phantomTarget', 'reduceMotion', 'shiftPreview', 'theme']);
+  });
+
+  it('refuses every name inherited from Object.prototype, for every enum setting', () => {
+    // The tables are plain objects, so a lookup that is not an own-property
+    // test answers true for 'constructor', '__proto__' and 'toString' and
+    // hands the theme builder a pack it does not have. JSON.parse rather than
+    // a literal: `{__proto__: x}` as a literal sets the prototype, while the
+    // parsed form makes an own key, which is what a stored record carries.
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      const json = `{${ENUM_KEYS.map((k) => `${JSON.stringify(k)}:${JSON.stringify(name)}`).join(',')}}`;
+      expect(cleanSettings(JSON.parse(json)), name).toEqual(DEFAULT_SETTINGS);
+      expect(applyShared(DEFAULT_SETTINGS, JSON.parse(json)), name).toEqual(DEFAULT_SETTINGS);
+      expect(cleanSharedRecord(JSON.parse(json)).settings, name).toEqual({});
+    }
+  });
+
+  it('reads the boolean reduce motion that older builds stored', () => {
+    // true was a choice and stays one. false was the default nobody chose:
+    // it becomes the new default, not 'off', which would override a device
+    // preference the player never asked to override.
+    expect(cleanSettings({ reduceMotion: true }).reduceMotion).toBe('on');
+    expect(cleanSettings({ reduceMotion: false }).reduceMotion).toBe('system');
+    expect(cleanSettings({ reduceMotion: 'off' }).reduceMotion).toBe('off');
+    expect(cleanSettings({ reduceMotion: 'on' }).reduceMotion).toBe('on');
+    expect(cleanSettings({ reduceMotion: 'system' }).reduceMotion).toBe('system');
+    expect(cleanSettings({ reduceMotion: 'yes' }).reduceMotion).toBe(DEFAULT_SETTINGS.reduceMotion);
+    expect(cleanSettings({ reduceMotion: 1 }).reduceMotion).toBe(DEFAULT_SETTINGS.reduceMotion);
+    // The shared record overlays the same way: an old record still applies.
+    const on: Settings = { ...DEFAULT_SETTINGS, reduceMotion: 'on' };
+    expect(applyShared(on, { reduceMotion: false }).reduceMotion).toBe('system');
+    expect(applyShared(DEFAULT_SETTINGS, { reduceMotion: true }).reduceMotion).toBe('on');
+    expect(applyShared(on, { reduceMotion: 'nope' }).reduceMotion).toBe('on');
   });
 });
 
@@ -242,6 +295,31 @@ describe('shared settings', () => {
     ).toEqual(free);
     expect(applyShared(free, null)).toEqual(free);
     expect(applyShared(free, 'nope')).toEqual(free);
+  });
+
+  it('are what a reset puts back, and nothing else', () => {
+    // Reset touches the player's preferences only: the rules of the free game
+    // and everything about progress are not in this record at all.
+    expect(Object.keys(defaultShared()).sort()).toEqual([...SHARED_SETTING_KEYS].sort());
+    const mine: Settings = { ...DEFAULT_SETTINGS, difficulty: 'expert', theme: 'dark', reduceMotion: 'on', phantomMode: true };
+    const reset = { ...mine, ...defaultShared() };
+    expect(reset.theme).toBe(DEFAULT_SETTINGS.theme);
+    expect(reset.reduceMotion).toBe(DEFAULT_SETTINGS.reduceMotion);
+    expect(reset.difficulty).toBe('expert');
+    expect(reset.phantomMode).toBe(true);
+  });
+
+  it('come out of the stored record with the intro flag beside them', () => {
+    const stored = JSON.parse(JSON.stringify({ ...pickShared({ ...DEFAULT_SETTINGS, theme: 'dark' }), seenIntro: true }));
+    expect(cleanSharedRecord(stored)).toEqual({ settings: pickShared({ ...DEFAULT_SETTINGS, theme: 'dark' }), seenIntro: true });
+    // A flag that is not a boolean, or is missing, means the intro has not been seen.
+    expect(cleanSharedRecord({ theme: 'light', seenIntro: 'yes' })).toEqual({ settings: { theme: 'light' }, seenIntro: false });
+    expect(cleanSharedRecord({ theme: 'light' }).seenIntro).toBe(false);
+    // Nothing the app does not know survives into the settings.
+    expect(cleanSharedRecord({ difficulty: 'expert', theme: 'ultraviolet', seenIntro: false })).toEqual({ settings: {}, seenIntro: false });
+    expect(cleanSharedRecord(null)).toEqual({ settings: {}, seenIntro: false });
+    expect(cleanSharedRecord('nope')).toEqual({ settings: {}, seenIntro: false });
+    expect(cleanSharedRecord([1, 2])).toEqual({ settings: {}, seenIntro: false });
   });
 });
 

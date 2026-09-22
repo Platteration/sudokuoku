@@ -1,6 +1,33 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameState, Profile, normalizeProfile } from './engine';
-import { GameSlot, SharedSettings, forStorage, readSavedGame } from './utils/saved';
+import {
+  GameSlot,
+  SharedRecord,
+  cleanSharedRecord,
+  fields,
+  forStorage,
+  readSavedGame,
+} from './utils/saved';
+
+/**
+ * Every record this app keeps, by name. The keys are `sudokuoku:<record>:v1`
+ * with colons where the shared convention spells `<app>.<record>.v<N>` with
+ * dots: they are namespaced and versioned, which is what the convention is
+ * for, and renaming them for spelling would put every player's games through
+ * a migration for nothing. Grandfathered, and pinned by the contract test.
+ */
+export const KEYS = {
+  game: 'sudokuoku:game:v1',
+  daily: 'sudokuoku:daily:v1',
+  profile: 'sudokuoku:profile:v1',
+  settings: 'sudokuoku:settings:v1',
+} as const;
+
+/** Records older builds wrote, read once and folded into the ones above. */
+export const LEGACY_KEYS = {
+  stats: 'sudokuoku:stats:v1',
+  helpSeen: 'sudokuoku:helpSeen:v1',
+} as const;
 
 /**
  * Where each of the two games is stored. Which kind of game a save is read as
@@ -10,14 +37,9 @@ import { GameSlot, SharedSettings, forStorage, readSavedGame } from './utils/sav
  * has no staleness check — and destroys the free game on every launch.
  */
 const GAME_KEYS: Record<GameSlot, string> = {
-  free: 'sudokuoku:game:v1',
-  daily: 'sudokuoku:daily:v1',
+  free: KEYS.game,
+  daily: KEYS.daily,
 };
-
-const PROFILE_KEY = 'sudokuoku:profile:v1';
-const SHARED_SETTINGS_KEY = 'sudokuoku:settings:v1';
-const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
-const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
 
 async function loadState(slot: GameSlot): Promise<GameState | null> {
   try {
@@ -54,14 +76,14 @@ export async function clearDailyGame(): Promise<void> {
 
 export async function loadProfile(): Promise<Profile> {
   try {
-    const raw = await AsyncStorage.getItem(PROFILE_KEY);
+    const raw = await AsyncStorage.getItem(KEYS.profile);
     if (raw) return normalizeProfile(JSON.parse(raw));
     // One-time migration from the older stats-only store.
-    const legacy = await AsyncStorage.getItem(LEGACY_STATS_KEY);
+    const legacy = await AsyncStorage.getItem(LEGACY_KEYS.stats);
     if (legacy) {
       const profile = normalizeProfile({ stats: JSON.parse(legacy) });
-      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-      await AsyncStorage.removeItem(LEGACY_STATS_KEY);
+      await AsyncStorage.setItem(KEYS.profile, JSON.stringify(profile));
+      await AsyncStorage.removeItem(LEGACY_KEYS.stats);
       return profile;
     }
     return normalizeProfile(null);
@@ -72,7 +94,7 @@ export async function loadProfile(): Promise<Profile> {
 
 export async function saveProfile(profile: Profile): Promise<void> {
   try {
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    await AsyncStorage.setItem(KEYS.profile, JSON.stringify(profile));
   } catch {
     // best-effort
   }
@@ -80,44 +102,77 @@ export async function saveProfile(profile: Profile): Promise<void> {
 
 export async function clearProfile(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(PROFILE_KEY);
+    await AsyncStorage.removeItem(KEYS.profile);
   } catch {
     // best-effort
+  }
+}
+
+/** Parsed JSON, or `UNREADABLE` when the bytes are not JSON at all. */
+const UNREADABLE = Symbol('unreadable');
+function parse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return UNREADABLE;
   }
 }
 
 /**
  * Appearance and assistance live outside both games: only one game is on
  * screen when they change, so the game states cannot be the record of them.
+ * The record also carries whether the introduction has been seen, which an
+ * older build kept under its own key; that flag is folded in here, once.
+ *
+ * The fold follows the shared migration shape: when the record already
+ * carries the flag the old key is only deleted, otherwise the old value is
+ * written into the record and the old key removed only once that write has
+ * succeeded, so a failed write is retried on the next launch. A record that is
+ * not JSON is left exactly as it is — it is still the player's only copy — and
+ * the old flag is read without being moved. A failing store reports the
+ * introduction as seen, so a device that cannot persist is not asked to read
+ * it on every launch.
  */
-export async function loadSharedSettings(): Promise<unknown> {
+export async function loadSharedSettings(): Promise<SharedRecord> {
   try {
-    const raw = await AsyncStorage.getItem(SHARED_SETTINGS_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const raw = await AsyncStorage.getItem(KEYS.settings);
+    const parsed = raw === null ? null : parse(raw);
+    const record = cleanSharedRecord(parsed === UNREADABLE ? null : parsed);
+    if (typeof fields(parsed).seenIntro === 'boolean') {
+      await remove(LEGACY_KEYS.helpSeen);
+      return record;
+    }
+    const legacy = await AsyncStorage.getItem(LEGACY_KEYS.helpSeen);
+    if (legacy === null) return record;
+    const seenIntro = legacy === '1';
+    if (parsed !== UNREADABLE) {
+      try {
+        await AsyncStorage.setItem(KEYS.settings, JSON.stringify({ ...fields(parsed), seenIntro }));
+        await AsyncStorage.removeItem(LEGACY_KEYS.helpSeen);
+      } catch {
+        // The old flag stays where it is and is tried again next launch.
+      }
+    }
+    return { ...record, seenIntro };
   } catch {
-    return null;
+    return { settings: {}, seenIntro: true };
   }
 }
 
-export async function saveSharedSettings(settings: SharedSettings): Promise<void> {
+export async function saveSharedSettings(record: SharedRecord): Promise<void> {
   try {
-    await AsyncStorage.setItem(SHARED_SETTINGS_KEY, JSON.stringify(settings));
+    await AsyncStorage.setItem(
+      KEYS.settings,
+      JSON.stringify({ ...record.settings, seenIntro: record.seenIntro }),
+    );
   } catch {
     // best-effort
   }
 }
 
-export async function hasSeenHelp(): Promise<boolean> {
+async function remove(key: string): Promise<void> {
   try {
-    return (await AsyncStorage.getItem(HELP_SEEN_KEY)) === '1';
-  } catch {
-    return true; // if storage is unavailable, do not nag on every launch
-  }
-}
-
-export async function markHelpSeen(): Promise<void> {
-  try {
-    await AsyncStorage.setItem(HELP_SEEN_KEY, '1');
+    await AsyncStorage.removeItem(key);
   } catch {
     // best-effort
   }
