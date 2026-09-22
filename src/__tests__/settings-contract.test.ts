@@ -129,11 +129,78 @@ describe('the About card', () => {
  * text instead. What a screen reader is told on the web build is the case in
  * point — react-native-web maps no accessibilityState at all, so a control
  * that says nothing beside it says nothing at all, and every test here ran
- * green while it did.
+ * green while it did. The rest of these are the other mutations that left
+ * the suite green: a haptic the Vibration switch cannot gate, a confirmation
+ * that does nothing on the web, pencil marks in a tone the palette test does
+ * not hold to the board, and a reset that puts back more than the
+ * preferences.
  */
 describe('the screens', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
+
+  /** Every source file the app ships, by path; tests are not screens. */
+  const sources = (): { file: string; text: string }[] => {
+    const out: { file: string; text: string }[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== '__tests__') walk(full);
+        } else if (/\.tsx?$/.test(entry.name)) {
+          out.push({ file: path.relative(root, full), text: fs.readFileSync(full, 'utf8') });
+        }
+      }
+    };
+    walk(path.join(root, 'src'));
+    for (const name of ['App.tsx', 'index.ts']) {
+      out.push({ file: name, text: fs.readFileSync(path.join(root, name), 'utf8') });
+    }
+    expect(out.length).toBeGreaterThan(10); // the walk found the app
+    return out;
+  };
+
+  it('fires every haptic through haptics.ts, where the Vibration setting is', () => {
+    for (const { file, text } of sources()) {
+      if (file === path.join('src', 'haptics.ts')) continue;
+      expect(text, `${file} reaches expo-haptics past the setting`).not.toMatch(/from 'expo-haptics'/);
+    }
+    // ...and the screen that owns the setting sets the flag the module reads,
+    // or the switch gates nothing at all.
+    expect(read('src/screens/GameScreen.tsx')).toMatch(/setHapticsEnabled\(state\.settings\.haptics\)/);
+  });
+
+  it('asks every confirmation through confirm.ts, where the web fallback is', () => {
+    // react-native-web implements Alert as an empty stub, so a two-button
+    // Alert on the web is a button that does nothing at all. The one notice
+    // the app raises directly is a single message with no choice in it, and
+    // it already falls back to window.alert on that platform.
+    for (const { file, text } of sources()) {
+      if (file === path.join('src', 'confirm.ts')) continue;
+      const calls = [...text.matchAll(/Alert\.alert\(([\s\S]*?)\);/g)].map((m) => m[1]);
+      const expected = file === path.join('src', 'screens', 'GameScreen.tsx') ? 1 : 0;
+      expect(calls.length, `${file} raises an Alert of its own`).toBe(expected);
+      for (const args of calls) {
+        expect(args, `${file} confirms with a bare Alert.alert`).not.toContain('[');
+      }
+    }
+  });
+
+  it('draws pencil marks in the ink the palette test holds to the board', () => {
+    // The palette pins given === text and holds it to AA on every cell fill;
+    // what the marks are actually drawn in is here.
+    expect(read('src/components/Board.tsx')).toMatch(/\bnote: \{[^}]*\bcolor: colors\.text,/);
+  });
+
+  it('resets exactly the preferences, in the words every app in the set uses', () => {
+    const sheet = read('src/components/SettingsSheet.tsx');
+    expect(sheet).toMatch(/title: 'Reset settings\?',/);
+    expect(sheet).toMatch(/'This puts every preference back to its default\./);
+    expect(sheet).toMatch(/cancelLabel: 'Cancel',\n\s*confirmLabel: 'Reset',/);
+    // defaultShared() is SHARED_SETTING_KEYS and nothing else: a patch with a
+    // rule or the intro flag in it would reset what is not a preference.
+    expect(sheet).toMatch(/onConfirm: \(\) => onChange\(defaultShared\(\)\),/);
+  });
 
   it('says which choice is the current one, on the web as well as on a device', () => {
     // The aria prop beside accessibilityState is the whole of what a browser

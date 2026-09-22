@@ -390,10 +390,10 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         size="md"
         onPress={() =>
           confirmAction({
-            title: 'Reset settings to defaults?',
+            title: 'Reset settings?',
             message:
-              'Appearance, motion, vibration and assistance go back to how they started. Your games, your progress and the rules of the free game are not touched.',
-            cancelLabel: 'Keep',
+              'This puts every preference back to its default. Your two games, your streaks and badges, and the rules of the free game are not affected.',
+            cancelLabel: 'Cancel',
             confirmLabel: 'Reset',
             onConfirm: () => onChange(defaultShared()),
           })
