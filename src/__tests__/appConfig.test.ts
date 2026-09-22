@@ -261,7 +261,21 @@ describe('Android permissions', () => {
     // of this app's own. So the only URL in the source is that one, and the
     // only thing it is handed to is Linking.openURL.
     const source = appSource();
-    expect(source).not.toMatch(/\bfetch\(|axios|XMLHttpRequest|WebSocket|openBrowserAsync|expo-updates/);
+    // The APIs that open a socket, and the packages that open one for you:
+    // expo-network reads the connection, expo-web-browser and
+    // react-native-webview each embed a browser, and expo-updates fetches a
+    // new bundle at launch. None of them is a dependency either.
+    expect(source).not.toMatch(
+      /\bfetch\(|axios|XMLHttpRequest|WebSocket|EventSource|openBrowserAsync|\bWebView\b/
+    );
+    expect(source).not.toMatch(/expo-updates|expo-network|expo-web-browser|react-native-webview/);
+    for (const name of ['expo-updates', 'expo-network', 'expo-web-browser', 'react-native-webview']) {
+      expect(pkg.dependencies[name], name).toBeUndefined();
+    }
+    // An image drawn from a `uri` is a socket the app opens without naming a
+    // network API at all: the renderer fetches it. Every asset here is
+    // bundled and reached with require(), so there is no uri to draw from.
+    expect(source).not.toMatch(/\buri:/);
     const urls = [...source.matchAll(/https?:\/\/[^\s'"`)]+/g)].map((m) => m[0]);
     expect([...new Set(urls)]).toEqual([SOURCE_URL]);
     expect(source.match(/\bopenURL\([^)]*\)/g)).toEqual(['openURL(SOURCE_URL)']);

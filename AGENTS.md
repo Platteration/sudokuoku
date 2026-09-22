@@ -10,9 +10,13 @@ the test pins even at its default. SDK 57 dropped the top-level `splash` block a
 `expo-splash-screen`'s plugin no-ops without props, so the splash lives only in
 `plugins`; `userInterfaceStyle: automatic` reaches Android only through
 `expo-system-ui`, which is a dependency for that reason. The app has no network code
-(Share result is the system share sheet), so `android.blockedPermissions` strips
-INTERNET, the storage/media set and SYSTEM_ALERT_WINDOW from the shipped build (VIBRATE,
-for expo-haptics, is all that remains) and `plugins/withDebugInternet.js` (copied
+(Share result is the system share sheet) — the test reads the source for it: no socket
+API, no image drawn from a `uri`, and none of the packages that open one for you
+(expo-updates, expo-network, expo-web-browser, react-native-webview), leaving
+`Linking.openURL(SOURCE_URL)` as the one URL the app hands out. So
+`android.blockedPermissions` strips INTERNET, the storage/media set and
+SYSTEM_ALERT_WINDOW from the shipped build (VIBRATE, for expo-haptics, is all that
+remains) and `plugins/withDebugInternet.js` (copied
 verbatim from drawdraw) adds INTERNET back to the debug source set alone, which is how a
 dev client still reaches Metro. `allowBackup` is explicitly true because the store is
 the player's own record (two game slots and a profile), and a restore is untrusted JSON
