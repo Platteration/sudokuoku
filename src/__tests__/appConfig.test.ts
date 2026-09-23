@@ -232,7 +232,8 @@ describe('Android permissions', () => {
     for (const file of files) {
       const xml = fs.readFileSync(file, 'utf8');
       for (const m of xml.matchAll(/<uses-permission[^>]*android:name="([^"]+)"/g)) {
-        declaredBy.set(m[1], [...(declaredBy.get(m[1]) ?? []), path.relative(root, file)]);
+        const permission = m[1]!; // the pattern's one group, which every match fills
+        declaredBy.set(permission, [...(declaredBy.get(permission) ?? []), path.relative(root, file)]);
       }
     }
 

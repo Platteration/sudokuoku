@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, GameState, newGame, reduce } from '../game';
 import {
   BADGES,
@@ -40,7 +40,9 @@ function winGame(state: GameState, elapsed = 300): GameState {
   let guard = 0;
   while (s.status === 'playing' && guard++ < 600) {
     const q = s.values.findIndex((v, i) => v === 0 && !(s.phantoms[i] && !s.phantoms[i]!.unlocked && s.moves < s.phantoms[i]!.unlockAtMove));
-    s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit: s.solution[q] });
+    const digit = s.solution[q];
+    assert.isDefined(digit, 'no empty, unlocked cell to fill');
+    s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit });
   }
   expect(s.status).toBe('won');
   return { ...s, elapsed };
@@ -575,6 +577,18 @@ describe('a profile or a save that was edited', () => {
     expect(out.profile.totals.won).toBe(1);
   });
 
+  it('reads a key with a part missing as no day at all', () => {
+    // A key off the disk need not have three parts. A missing part reads as
+    // NaN, as the arithmetic on \`undefined\` always did, never as a default
+    // that would land the key on a real day.
+    for (const key of ['', '2026', '2026-09']) {
+      expect(Number.isNaN(parseDateKey(key).getTime())).toBe(true);
+      expect(shiftDateKey(key, -1)).toBe('NaN-NaN-NaN');
+      expect(isDateKey(key)).toBe(false);
+      expect(dailyConfig(key).difficulty).toBe('medium');
+    }
+  });
+
   it('answers dailyConfig for any key rather than throwing', () => {
     // The Daily sheet's only button reaches this with a key off the disk.
     expect(() => dailyConfig('not-a-date')).not.toThrow();
@@ -604,6 +618,7 @@ describe('a profile or a save that was edited', () => {
       },
     });
     const stored = p.daily[key];
+    assert.isDefined(stored, 'the record is kept under its own key');
     // Both claims are values the app itself writes on other days, so nothing
     // coerces them: a daily's difficulty and phantom rule are a function of
     // its date, and a record does not get to say otherwise. Believed, the
@@ -629,7 +644,9 @@ describe('a profile or a save that was edited', () => {
         },
       },
     });
-    const text = shareText(p.daily['2026-09-09'], 1);
+    const stored = p.daily['2026-09-09'];
+    assert.isDefined(stored, 'the record is kept');
+    const text = shareText(stored, 1);
     expect(text).not.toContain('evil.example');
     expect(text.split('\n')).toHaveLength(3);
     // 2026-09-09 is a Wednesday, so it is a phantom day and the card says so
@@ -651,8 +668,8 @@ describe('a profile or a save that was edited', () => {
       profile = recordGameWin(profile, won, parseDateKey(key)).profile;
     }
     expect(Object.keys(profile.daily)).toHaveLength(3);
-    expect(profile.daily['2026-09-06'].difficulty).toBe('expert'); // a Sunday
-    expect(profile.daily['2026-09-09'].phantom).toBe(true); // a Wednesday
+    expect(profile.daily['2026-09-06']?.difficulty).toBe('expert'); // a Sunday
+    expect(profile.daily['2026-09-09']?.phantom).toBe(true); // a Wednesday
     expect(normalizeProfile(JSON.parse(JSON.stringify(profile)))).toEqual(profile);
   });
 

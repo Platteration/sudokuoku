@@ -232,12 +232,13 @@ export function cleanSharedRecord(raw: unknown): SharedRecord {
 // ---------------------------------------------------------------------------
 // Saved games
 
+/** 0 for an empty cell, else 1..9. */
+function isDigit(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 9;
+}
+
 function isDigitGrid(x: unknown): x is number[] {
-  return (
-    Array.isArray(x) &&
-    x.length === CELLS &&
-    x.every((v) => Number.isInteger(v) && v >= 0 && v <= 9)
-  );
+  return Array.isArray(x) && x.length === CELLS && x.every(isDigit);
 }
 
 function isFlagGrid(x: unknown): x is boolean[] {
@@ -286,12 +287,18 @@ const noteGrid = (x: unknown): number[] =>
 const position = (v: unknown): number | null =>
   Number.isInteger(v) && (v as number) >= 0 && (v as number) < CELLS ? (v as number) : null;
 
+/**
+ * A faded cell, or null when the record is not one. Its value is a digit as
+ * the grids hold them: a shift relabels it by indexing a ten-entry table, and
+ * a value off that table came out of the shift as no digit at all.
+ */
 function phantom(x: unknown): Phantom | null {
   if (!x || typeof x !== 'object') return null;
   const p = x as Record<string, unknown>;
   if (![p.id, p.value, p.unlockAtMove, p.createdAtMove].every((v) => typeof v === 'number')) {
     return null;
   }
+  if (!isDigit(p.value)) return null;
   return {
     id: p.id as number,
     value: p.value as number,

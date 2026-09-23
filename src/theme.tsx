@@ -24,13 +24,21 @@ export interface Shadow {
   elevation: number;
 }
 
+interface ShadowSpec {
+  o: number;
+  r: number;
+  y: number;
+  e: number;
+}
+
 export function shadow(level: 0 | 1 | 2 | 3, dark = false): Shadow {
-  const spec = [
+  const specs: [ShadowSpec, ShadowSpec, ShadowSpec, ShadowSpec] = [
     { o: 0, r: 0, y: 0, e: 0 },
     { o: dark ? 0.32 : 0.08, r: 3, y: 1, e: 2 },
     { o: dark ? 0.4 : 0.12, r: 8, y: 3, e: 5 },
     { o: dark ? 0.5 : 0.18, r: 18, y: 8, e: 12 },
-  ][level];
+  ];
+  const spec = specs[level];
   return {
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: spec.y },

@@ -79,7 +79,7 @@ export default function ShiftDemo({ size, playing, reduceMotion }: Props) {
   }, [start]);
 
   const advance = React.useCallback(() => {
-    const next = STEPS[stepRef.current % STEPS.length];
+    const next = STEPS[stepRef.current % STEPS.length]!;
     stepRef.current += 1;
     setStep(stepRef.current);
     setState((s) => applyShift(s, next.shift));

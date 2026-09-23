@@ -110,7 +110,7 @@ export default function ProgressSheet({ visible, profile, todayKey, onClose, onR
         return (
           <View key={d} style={styles.card}>
             <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{d[0].toUpperCase() + d.slice(1)}</Text>
+              <Text style={styles.cardTitle}>{d.charAt(0).toUpperCase() + d.slice(1)}</Text>
               <Text style={styles.cardMeta}>
                 {s.won}/{s.played} won
                 {s.won > 0 ? ` · ${s.cleanWins} unaided` : ''}

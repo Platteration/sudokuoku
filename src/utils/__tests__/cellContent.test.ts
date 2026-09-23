@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import {
   Action,
   DEFAULT_SETTINGS,
@@ -25,7 +25,9 @@ const run = (state: GameState, ...actions: Action[]) => actions.reduce(reduce, s
 /** Fills the first empty, unlocked cell with its solution digit. */
 function playCorrect(state: GameState): GameState {
   const q = state.values.findIndex((v, i) => v === 0 && !isLocked(state, i));
-  return run(state, { type: 'select', pos: q }, { type: 'input', digit: state.solution[q], now: 1000 });
+  const digit = state.solution[q];
+  assert.isDefined(digit, 'no empty, unlocked cell to fill');
+  return run(state, { type: 'select', pos: q }, { type: 'input', digit, now: 1000 });
 }
 
 /** A game with one faded cell, still locked. */

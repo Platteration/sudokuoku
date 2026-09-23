@@ -71,7 +71,8 @@ export default function ShiftBanner({
   // A move can fire several shifts, so the preview names all of them: telling
   // the player about the first of two is worse than telling them nothing.
   const showPreview = preview !== 'off';
-  const category = next.length > 0 ? SHIFT_CATEGORY[next[0].kind] : null;
+  const [first] = next;
+  const category = first ? SHIFT_CATEGORY[first.kind] : null;
   const previewText = !showPreview
     ? null
     : next.length === 0

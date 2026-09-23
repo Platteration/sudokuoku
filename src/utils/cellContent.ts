@@ -25,11 +25,12 @@ export interface CellContent {
  * cell's contents. `describeCell` says the same thing to a screen reader.
  */
 export function cellContent(state: GameState, pos: number): CellContent {
-  const value = state.values[pos];
+  // pos is a board position, and every board array has one entry per cell.
+  const value = state.values[pos]!;
   return {
-    phantom: state.phantoms[pos],
+    phantom: state.phantoms[pos] ?? null, // not `!`, which would strip null too
     marker: state.settings.phantomMarkers && isLocked(state, pos),
     value,
-    notes: value === 0 ? state.notes[pos] : 0,
+    notes: value === 0 ? state.notes[pos]! : 0,
   };
 }

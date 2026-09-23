@@ -158,7 +158,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         options={DIFFICULTIES}
         value={difficulty}
         onChange={setDifficulty}
-        label={(d) => d[0].toUpperCase() + d.slice(1)}
+        label={(d) => d.charAt(0).toUpperCase() + d.slice(1)}
       />
 
       {daily ? null : (
@@ -299,7 +299,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         options={THEMES}
         value={settings.theme}
         onChange={(t) => onChange({ theme: t })}
-        label={(t) => t[0].toUpperCase() + t.slice(1)}
+        label={(t) => t.charAt(0).toUpperCase() + t.slice(1)}
       />
       <Text style={styles.subsection}>Colour pack</Text>
       <View style={styles.packs}>
@@ -338,7 +338,7 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         options={MOTION}
         value={settings.reduceMotion}
         onChange={(v) => onChange({ reduceMotion: v })}
-        label={(v) => v[0].toUpperCase() + v.slice(1)}
+        label={(v) => v.charAt(0).toUpperCase() + v.slice(1)}
       />
       <Text style={styles.sectionHint}>
         On: cells jump straight to their new places, with no sliding, flashing or popping.

@@ -18,7 +18,9 @@ export function dateKey(date: Date): string {
 }
 
 export function parseDateKey(key: string): Date {
-  const [y, m, d] = key.split('-').map(Number);
+  // A part the key lacks reads as NaN, as `undefined` did in the arithmetic:
+  // a key of fewer than three parts is the Invalid Date it always was.
+  const [y = NaN, m = NaN, d = NaN] = key.split('-').map(Number);
   return new Date(y, m - 1, d);
 }
 
@@ -34,7 +36,7 @@ export function parseDateKey(key: string): Date {
  * every zone, so the step always moves.
  */
 export function shiftDateKey(key: string, days: number): string {
-  const [y, m, d] = key.split('-').map(Number);
+  const [y = NaN, m = NaN, d = NaN] = key.split('-').map(Number); // as in parseDateKey
   const t = new Date(Date.UTC(y, m - 1, d) + days * 86_400_000);
   const yy = t.getUTCFullYear();
   const mm = String(t.getUTCMonth() + 1).padStart(2, '0');
@@ -106,7 +108,7 @@ export function dailyConfig(key: string): DailyConfig {
   // rather than throw in whichever screen asked for it.
   const difficulty = WEEKDAY_DIFFICULTY[day] ?? 'medium';
   const phantom = day === 0 || day === 3;
-  const cap = difficulty[0].toUpperCase() + difficulty.slice(1);
+  const cap = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
   return { key, difficulty, phantom, label: phantom ? `${cap} · Phantom day` : cap };
 }
 
@@ -339,7 +341,9 @@ export function xpForWin(state: GameState): number {
   return Math.max(10, withDaily);
 }
 
-const TITLES: [number, string][] = [
+type Title = [minLevel: number, title: string];
+
+const TITLES: [Title, ...Title[]] = [
   [1, 'Newcomer'],
   [2, 'Apprentice'],
   [3, 'Shifter'],

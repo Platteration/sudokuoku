@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, GameState, newGame, reduce } from '../../engine';
 import { describeCell, describeShift } from '../describe';
 
@@ -36,7 +36,9 @@ describe('describeCell', () => {
       78,
     );
     const q = s.values.findIndex((v) => v === 0);
-    s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit: s.solution[q] });
+    const digit = s.solution[q];
+    assert.isDefined(digit, 'no empty cell to fill');
+    s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit });
     const locked = s.phantoms.findIndex((ph) => ph !== null);
     expect(locked).toBeGreaterThanOrEqual(0);
     expect(describeCell(s, locked)).toMatch(/faded and locked for \d more moves?$/);

@@ -99,7 +99,7 @@ describe('shift geometry', () => {
     const s = boxSlideShift(1, 2);
     for (let p = 0; p < CELLS; p++) {
       const box = (q: number) => Math.floor(Math.floor(q / 9) / 3) * 3 + Math.floor((q % 9) / 3);
-      expect(box(s.dest[p])).toBe(box(p));
+      expect(box(s.dest[p]!)).toBe(box(p));
     }
   });
   it('relabel wraps 9 to 1 and moves notes along', () => {
@@ -153,7 +153,7 @@ describe('permute', () => {
     const s = stacksShift(1);
     const ids = Array.from({ length: CELLS }, (_, i) => i);
     const moved = permute(ids, s);
-    for (let p = 0; p < CELLS; p++) expect(moved[s.dest[p]]).toBe(p);
+    for (let p = 0; p < CELLS; p++) expect(moved[s.dest[p]!]).toBe(p);
   });
 });
 

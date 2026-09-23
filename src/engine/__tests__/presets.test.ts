@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, newGame, reduce } from '../game';
 import { PRESETS, applyPreset, matchingPreset } from '../presets';
 import { ALL_SHIFT_KINDS } from '../transforms';
@@ -39,7 +39,9 @@ describe('presets', () => {
     let s = newGame(settings, 5);
     for (let i = 0; i < 6; i++) {
       const q = s.values.findIndex((v) => v === 0);
-      s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit: s.solution[q] });
+      const digit = s.solution[q];
+      assert.isDefined(digit, 'no empty cell to fill');
+      s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit });
     }
     expect(s.shiftCount).toBe(0);
     expect(s.phantomCount).toBe(0);

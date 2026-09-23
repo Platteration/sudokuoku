@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import {
   CELLS,
   DEFAULT_SETTINGS,
   GameState,
   RULE_KEYS,
   Settings,
+  applyShift,
   dailyConfig,
   dailySeed,
   dailySettings,
@@ -13,6 +14,7 @@ import {
   newGame,
   recordGameWin,
   reduce,
+  relabelShift,
   xpForWin,
 } from '../../engine';
 import {
@@ -90,8 +92,10 @@ describe('what a save costs', () => {
     expect(restored.history).toHaveLength(PERSISTED_HISTORY);
     // The most recent move is the one a player comes back and undoes.
     const undone = reduce(restored, { type: 'undo' });
-    expect(undone.values).toEqual(s.history[s.history.length - 1].values);
-    expect(undone.tokens).toEqual(s.history[s.history.length - 1].tokens);
+    const last = s.history[s.history.length - 1];
+    assert.isDefined(last, 'the game has a move to undo');
+    expect(undone.values).toEqual(last.values);
+    expect(undone.tokens).toEqual(last.tokens);
   });
 });
 
@@ -123,7 +127,7 @@ describe('reading a save back', () => {
     // the board, or one cell holding two of them, throws while rendering.
     const s = play(DEFAULT_SETTINGS, 12, 2);
     const duplicated = s.tokens.slice();
-    duplicated[0] = duplicated[1];
+    duplicated[0] = duplicated[1]!;
     expect(readSavedGame({ ...s, tokens: duplicated }, 'free')).toBeNull();
     const outOfRange = s.tokens.slice();
     outOfRange[0] = CELLS + 5;
@@ -137,6 +141,36 @@ describe('reading a save back', () => {
     expect(readSavedGame({ ...s, lastShift: { ...s.lastShift, dest: 'nope' } }, 'free')!.lastShift).toBeNull();
     expect(readSavedGame({ ...s, lastShift: { ...s.lastShift, kind: 'wobble' } }, 'free')!.lastShift).toBeNull();
     expect(readSavedGame({ ...s, lastShift: s.lastShift }, 'free')!.lastShift).toEqual(s.lastShift);
+  });
+
+  it('drops a faded cell whose value is not a digit', () => {
+    // A shift relabels a faded digit by indexing a ten-entry table, so a
+    // stored value off it came out of the next shift as no digit at all,
+    // while the lock it carried held the cell until then.
+    const s = play(CHAOS, 15, 4);
+    const pos = s.phantoms.findIndex((ph) => ph !== null && !ph.unlocked);
+    const ph = s.phantoms[pos];
+    assert(ph, 'the game has a locked phantom');
+    const withValue = (value: unknown) =>
+      readSavedGame({
+        ...s,
+        phantoms: s.phantoms.map((p, i) => (i === pos ? { ...ph, value } : p)),
+        lastPhantom: { ...ph, value },
+      }, 'free')!;
+    for (const value of [10, -1, 1.5, Infinity]) {
+      const restored = withValue(value);
+      expect(restored.phantoms[pos]).toBeNull();
+      expect(restored.lastPhantom).toBeNull();
+      expect(isLocked(restored, pos)).toBe(false);
+    }
+    // Every digit a grid holds is kept, locked, and relabelled by a shift.
+    for (const value of [0, 1, 9]) {
+      const restored = withValue(value);
+      expect(restored.phantoms[pos]).toEqual({ ...ph, value });
+      expect(isLocked(restored, pos)).toBe(true);
+      const shift = relabelShift(1);
+      expect(applyShift(restored, shift).phantoms[pos]?.value).toBe(shift.relabel[value]);
+    }
   });
 
   it('repairs what it can rather than dropping the game', () => {
@@ -339,7 +373,7 @@ describe('a save that was edited', () => {
   it('cannot mint a daily result by finishing one in the free slot', () => {
     const raw = almostWon(21, { mode: 'daily', dailyKey: '2026-09-05', status: 'playing' });
     const restored = readSavedGame(raw, 'free')!;
-    const won = reduce(restored, { type: 'input', digit: restored.solution[0] });
+    const won = reduce(restored, { type: 'input', digit: restored.solution[0]! });
     expect(won.status).toBe('won');
     const out = recordGameWin(emptyProfile(), won, new Date(2026, 8, 11));
     expect(out.profile.daily).toEqual({});

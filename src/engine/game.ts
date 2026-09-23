@@ -242,7 +242,9 @@ function phantomRng(state: GameState) {
 /** True while nothing may be entered in the cell. */
 export function isLocked(state: GameState, pos: number): boolean {
   const ph = state.phantoms[pos];
-  return ph !== null && !ph.unlocked && state.moves < ph.unlockAtMove;
+  // pos is a board position and phantoms has one entry per cell, so past the
+  // null check the record is there.
+  return ph !== null && !ph!.unlocked && state.moves < ph!.unlockAtMove;
 }
 
 /** Locked phantoms only; unlocked records awaiting recall do not count. */
@@ -270,7 +272,7 @@ function scoreRecall(
   if (ph === null) return state;
   const phantoms = state.phantoms.slice();
   phantoms[pos] = null;
-  const recalled = !fromHint && digit === ph.value;
+  const recalled = !fromHint && digit === ph!.value; // a board position: see isLocked
   return {
     ...state,
     phantoms,
@@ -331,8 +333,8 @@ function spawnPhantom(state: GameState, exclude: number | null, now: number): Ga
   const pos = pick(phantomRng(state), eligible);
   const phantom: Phantom = {
     id: state.phantomCount + 1,
-    value: state.values[pos],
-    wasGiven: state.given[pos],
+    value: state.values[pos]!,
+    wasGiven: state.given[pos]!,
     startedAt: now,
     fadeMs: phantomFadeMs,
     createdAtMove: state.moves,
@@ -367,10 +369,12 @@ export function applyShift(state: GameState, shift: Shift): GameState {
     values: applyToGrid(state.values, shift),
     notes: applyToNotes(state.notes, shift),
     tokens: permute(state.tokens, shift),
+    // A phantom's value is a digit: the engine takes it off the board, and
+    // saved.ts refuses a stored one that is not.
     phantoms: permute(state.phantoms, shift).map((ph) =>
-      ph === null ? null : { ...ph, value: shift.relabel[ph.value] },
+      ph === null ? null : { ...ph, value: shift.relabel[ph.value]! },
     ),
-    selected: state.selected === null ? null : shift.dest[state.selected],
+    selected: state.selected === null ? null : shift.dest[state.selected]!,
     lastShift: event,
     shiftCount: state.shiftCount + 1,
     version: state.version + 1,
@@ -488,7 +492,7 @@ export function reduce(state: GameState, action: Action): GameState {
       if (state.notesMode) {
         if (state.values[p] !== 0) return state;
         const notes = state.notes.slice();
-        notes[p] ^= 1 << d;
+        notes[p]! ^= 1 << d;
         return { ...state, notes, version: state.version + 1 };
       }
       if (state.values[p] === d) return state;
@@ -522,14 +526,15 @@ export function reduce(state: GameState, action: Action): GameState {
       const p = state.selected;
       if (state.status !== 'playing' || p === null || state.given[p]) return state;
       if (isLocked(state, p)) return state;
-      if (state.values[p] === state.solution[p]) return state;
+      const answer = state.solution[p]!;
+      if (state.values[p] === answer) return state;
       const values = state.values.slice();
-      values[p] = state.solution[p];
+      values[p] = answer;
       const notes = state.notes.slice();
       notes[p] = 0;
       return afterMove(
         state,
-        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1 }, p, values[p], true),
+        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1 }, p, answer, true),
         p,
         action.now ?? Date.now(),
       );
@@ -563,6 +568,6 @@ export function mistakes(state: GameState): Set<number> {
 export function remainingCounts(state: GameState): number[] {
   const counts = new Array<number>(10).fill(9);
   counts[0] = 0;
-  for (const v of state.values) if (v !== 0) counts[v]--;
+  for (const v of state.values) if (v !== 0) counts[v]!--; // values are digits 0..9
   return counts;
 }

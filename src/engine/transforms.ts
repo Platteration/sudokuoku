@@ -288,27 +288,34 @@ export function randomShift(rng: Rng, enabled: ShiftKind[]): Shift | null {
 export function joinDescriptions(parts: readonly string[]): string {
   const kept = parts.filter((p) => p.length > 0);
   return kept
-    .map((p, i) => (i === 0 ? p : p[0].toLowerCase() + p.slice(1)))
+    .map((p, i) => (i === 0 ? p : p.charAt(0).toLowerCase() + p.slice(1)))
     .join(', then ');
 }
 
-/** Moves array contents according to the shift's position permutation. */
+/**
+ * Moves array contents according to the shift's position permutation. Every
+ * list moved is one entry per cell, the same length as `dest`.
+ */
 export function permute<T>(items: readonly T[], shift: Shift): T[] {
   const out = new Array<T>(items.length);
-  for (let p = 0; p < items.length; p++) out[shift.dest[p]] = items[p];
+  for (const [p, item] of items.entries()) out[shift.dest[p]!] = item;
   return out;
 }
 
-/** Applies a shift to a digit grid: positions move, then digits relabel. */
+/**
+ * Applies a shift to a digit grid: positions move, then digits relabel. A grid
+ * holds digits 0..9 (saved.ts refuses a save that does not), and `relabel` has
+ * an entry for each.
+ */
 export function applyToGrid(grid: readonly number[], shift: Shift): number[] {
-  return permute(grid, shift).map((d) => shift.relabel[d]);
+  return permute(grid, shift).map((d) => shift.relabel[d]!);
 }
 
 /** Applies a shift to a notes grid (bitmask per cell). */
 export function applyToNotes(notes: readonly number[], shift: Shift): number[] {
   return permute(notes, shift).map((mask) => {
     let out = 0;
-    for (let d = 1; d <= 9; d++) if (mask & (1 << d)) out |= 1 << shift.relabel[d];
+    for (let d = 1; d <= 9; d++) if (mask & (1 << d)) out |= 1 << shift.relabel[d]!;
     return out;
   });
 }

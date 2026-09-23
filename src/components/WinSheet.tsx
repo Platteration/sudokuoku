@@ -100,7 +100,7 @@ export default function WinSheet({ visible, state, outcome, onClose, onNewGame, 
       ) : null}
 
       <Text style={styles.meta}>
-        {state.settings.difficulty[0].toUpperCase() + state.settings.difficulty.slice(1)} · {daily ? `daily ${state.dailyKey}` : `seed ${state.seed}`}
+        {state.settings.difficulty.charAt(0).toUpperCase() + state.settings.difficulty.slice(1)} · {daily ? `daily ${state.dailyKey}` : `seed ${state.seed}`}
       </Text>
     </Sheet>
   );

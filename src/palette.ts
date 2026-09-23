@@ -98,7 +98,8 @@ export interface ThemePack {
 const light = (o: Partial<Colors>): Colors => ({ ...lightColors, ...o });
 const dark = (o: Partial<Colors>): Colors => ({ ...darkColors, ...o });
 
-export const THEME_PACKS: ThemePack[] = [
+/** Never empty: the first pack is what an id nobody knows falls back to. */
+export const THEME_PACKS: [ThemePack, ...ThemePack[]] = [
   {
     id: 'classic',
     name: 'Classic',

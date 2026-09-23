@@ -5,14 +5,18 @@ import { Colors, THEME_PACKS, lightColors } from '../palette';
 function luminance(hex: string): number {
   const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
   expect(m, `not a six-digit hex colour: ${hex}`).not.toBeNull();
-  const channels = [0, 2, 4].map((i) => parseInt(m![1].slice(i, i + 2), 16) / 255);
-  const linear = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  const digits = m![1]!; // the pattern's one group, which every match fills
+  const linear = (at: number) => {
+    const c = parseInt(digits.slice(at, at + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(0) + 0.7152 * linear(2) + 0.0722 * linear(4);
 }
 
 function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
 const schemes = ['light', 'dark'] as const;

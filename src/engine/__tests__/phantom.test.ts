@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import {
   Action,
   DEFAULT_SETTINGS,
@@ -24,14 +24,28 @@ const PHANTOM: Settings = {
 
 const run = (state: GameState, ...actions: Action[]) => actions.reduce(reduce, state);
 
+/** The solution's digit at `pos`; a findIndex that found nothing (-1) fails the test. */
+function answer(state: GameState, pos: number): number {
+  const digit = state.solution[pos];
+  assert.isDefined(digit, `no cell at position ${pos}`);
+  return digit;
+}
+
 /** Fills the first empty, unlocked cell with its solution digit. */
 function playCorrect(state: GameState, now = 1000): GameState {
   const q = state.values.findIndex((v, i) => v === 0 && !isLocked(state, i));
-  return run(state, { type: 'select', pos: q }, { type: 'input', digit: state.solution[q], now });
+  return run(state, { type: 'select', pos: q }, { type: 'input', digit: answer(state, q), now });
 }
 
 function phantomPositions(state: GameState): number[] {
   return state.phantoms.map((ph, i) => (ph && !ph.unlocked ? i : -1)).filter((i) => i >= 0);
+}
+
+/** Where the first locked phantom is; a board with none fails the test here. */
+function firstPhantom(state: GameState): number {
+  const [pos] = phantomPositions(state);
+  assert.isDefined(pos, 'no locked phantom on the board');
+  return pos;
 }
 
 describe('phantom creation', () => {
@@ -48,7 +62,7 @@ describe('phantom creation', () => {
     expect(s.phantomCount).toBe(0);
     s = playCorrect(s, 5000);
     expect(s.phantomCount).toBe(1);
-    const [pos] = phantomPositions(s);
+    const pos = firstPhantom(s);
     const ph = s.phantoms[pos]!;
     expect(s.values[pos]).toBe(0);
     expect(s.given[pos]).toBe(false);
@@ -97,14 +111,14 @@ describe('locked cells', () => {
     let s = newGame(PHANTOM, 24);
     s = playCorrect(s);
     s = playCorrect(s);
-    const [pos] = phantomPositions(s);
+    const pos = firstPhantom(s);
     return { s, pos };
   }
 
   it('reject values, notes, erase and hints while locked', () => {
     const { s, pos } = withPhantom();
     const sel = reduce(s, { type: 'select', pos });
-    expect(reduce(sel, { type: 'input', digit: s.solution[pos] }).moves).toBe(s.moves);
+    expect(reduce(sel, { type: 'input', digit: answer(s, pos) }).moves).toBe(s.moves);
     expect(reduce(sel, { type: 'hint' }).values[pos]).toBe(0);
     expect(reduce(sel, { type: 'erase' }).moves).toBe(s.moves);
     const notes = run(sel, { type: 'toggleNotesMode' }, { type: 'input', digit: 3 });
@@ -113,7 +127,7 @@ describe('locked cells', () => {
 
   it('unlock after the configured number of moves and can then be refilled', () => {
     let { s, pos } = withPhantom();
-    const token = s.tokens[pos];
+    const token = s.tokens[pos]!;
     expect(isLocked(s, pos)).toBe(true);
     s = playCorrect(s); // move 3
     s = playCorrect(s); // move 4 (a second phantom appears elsewhere)
@@ -122,7 +136,7 @@ describe('locked cells', () => {
     const where = s.tokens.indexOf(token);
     expect(isLocked(s, where)).toBe(false);
     expect(s.phantoms[where]!.unlocked).toBe(true);
-    const refilled = run(s, { type: 'select', pos: where }, { type: 'input', digit: s.solution[where] });
+    const refilled = run(s, { type: 'select', pos: where }, { type: 'input', digit: answer(s, where) });
     expect(refilled.values[where]).toBe(s.solution[where]);
     expect(refilled.moves).toBe(6);
     expect(refilled.phantoms[where]).toBeNull();
@@ -130,7 +144,7 @@ describe('locked cells', () => {
 
   it('scores a recall when the faded digit is put back, and a miss otherwise', () => {
     let { s, pos } = withPhantom();
-    const token = s.tokens[pos];
+    const token = s.tokens[pos]!;
     const faded = s.phantoms[pos]!.value;
     for (let i = 0; i < 3; i++) s = playCorrect(s);
     const where = s.tokens.indexOf(token);
@@ -169,8 +183,8 @@ describe('phantoms and the rest of the game', () => {
     let s = newGame(PHANTOM, 26);
     s = playCorrect(s);
     s = playCorrect(s);
-    const [pos] = phantomPositions(s);
-    const token = s.tokens[pos];
+    const pos = firstPhantom(s);
+    const token = s.tokens[pos]!;
     const value = s.phantoms[pos]!.value;
     const rotated = applyShift(s, rotateShift(1));
     const where = rotated.tokens.indexOf(token);
@@ -186,7 +200,7 @@ describe('phantoms and the rest of the game', () => {
     s = playCorrect(s);
     const before = s;
     s = playCorrect(s);
-    const [pos] = phantomPositions(s);
+    const pos = firstPhantom(s);
     const back = reduce(s, { type: 'undo' });
     expect(back.values).toEqual(before.values);
     expect(back.given).toEqual(before.given);
@@ -228,13 +242,13 @@ describe('hints are not recalls', () => {
     let s = newGame({ ...PHANTOM, phantomEvery: 2, phantomLockMoves: 2 }, seed);
     s = playCorrect(s);
     s = playCorrect(s);
-    const pos = phantomPositions(s)[0];
+    const pos = firstPhantom(s);
     return { s, pos };
   }
 
   it('hinting a faded cell scores a miss, never a recall', () => {
     let { s, pos } = untilPhantom(51);
-    const token = s.tokens[pos];
+    const token = s.tokens[pos]!;
     const faded = s.phantoms[pos]!.value;
     // The faded digit is the solution here, so a hint would "match" it.
     expect(faded).toBe(s.solution[pos]);
@@ -250,7 +264,7 @@ describe('hints are not recalls', () => {
 
   it('typing the same digit yourself still scores a recall', () => {
     let { s, pos } = untilPhantom(51);
-    const token = s.tokens[pos];
+    const token = s.tokens[pos]!;
     const faded = s.phantoms[pos]!.value;
     for (let i = 0; i < 2; i++) s = playCorrect(s);
     const where = s.tokens.indexOf(token);

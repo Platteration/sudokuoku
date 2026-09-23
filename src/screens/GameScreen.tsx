@@ -405,7 +405,7 @@ function GameView({
   const phantomJustSpawned =
     state.lastPhantom !== null && state.lastPhantom.createdAtMove === state.moves && activePhantoms > 0;
   const difficultyLabel =
-    state.settings.difficulty[0].toUpperCase() + state.settings.difficulty.slice(1);
+    state.settings.difficulty.charAt(0).toUpperCase() + state.settings.difficulty.slice(1);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>

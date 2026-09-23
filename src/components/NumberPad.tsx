@@ -20,7 +20,7 @@ export default function NumberPad({ remaining, notesMode, disabled, onDigit }: P
   return (
     <View style={styles.row}>
       {DIGITS.map((d) => {
-        const left = remaining[d];
+        const left = remaining[d]!; // remainingCounts has an entry for every digit
         const placed = left <= 0;
         // A digit that is fully placed stays tappable in notes mode, since a
         // pencil mark on it can still be useful while checking work.

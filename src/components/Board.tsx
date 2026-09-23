@@ -102,11 +102,13 @@ export default function Board({ state, size, onSelect, reduceMotion = false }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phantoms]);
 
+  // One animated position per token. tokens is a permutation of the cells
+  // (saved.ts refuses a save whose tokens are not), so every token indexes one.
   const positions = useRef<Animated.ValueXY[] | null>(null);
   if (positions.current === null) {
     positions.current = Array.from({ length: CELLS }, () => new Animated.ValueXY());
     tokens.forEach((token, pos) => {
-      positions.current![token].setValue({ x: colOf(pos) * cell, y: rowOf(pos) * cell });
+      positions.current![token]!.setValue({ x: colOf(pos) * cell, y: rowOf(pos) * cell });
     });
   }
   const prevCell = useRef(cell);
@@ -118,7 +120,7 @@ export default function Board({ state, size, onSelect, reduceMotion = false }: P
     const tokensChanged = prevTokens.current !== tokens;
     tokens.forEach((token, pos) => {
       const target = { x: colOf(pos) * cell, y: rowOf(pos) * cell };
-      const v = positions.current![token];
+      const v = positions.current![token]!;
       if (tokensChanged && settings.animateShifts && !reduceMotion && !sizeChanged) {
         anims.push(
           Animated.timing(v, {
@@ -246,7 +248,7 @@ export default function Board({ state, size, onSelect, reduceMotion = false }: P
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         {tokens.map((token, pos) => {
           const { phantom, marker, value, notes: note } = cellContent(state, pos);
-          const v = positions.current![token];
+          const v = positions.current![token]!;
           const fade = phantom ? fadeFor(phantom) : null;
           return (
             <Animated.View
