@@ -43,8 +43,9 @@ npm run check             # all of the above: the gate before a push
 ```
 
 GitHub Actions runs the same checks plus an Android and web Metro bundle on
-every push (`.github/workflows/ci.yml`). `eas.json` carries development,
-preview (Android APK) and production build profiles.
+every push (`.github/workflows/ci.yml`); a separate job runs
+`npm audit --omit=dev --audit-level=high` against the lockfile. `eas.json`
+carries development, preview (Android APK) and production build profiles.
 
 ## How the shifting works
 
