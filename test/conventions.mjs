@@ -1,6 +1,10 @@
 // The conventions shared by every platteration repository (see CONVENTIONS.md), pinned
-// so that a session cannot quietly re-decide them. Zero dependencies, node:test only,
-// and deliberately named so no other runner's glob picks it up.
+// so that a session cannot quietly re-decide them. node:test only, and deliberately named
+// so no other runner's glob picks it up. It imports nothing outside Node, but the
+// TypeScript test needs a git checkout (it lists the tracked files) and the installed
+// tree: typescript from node_modules, and expo for a config that extends
+// expo/tsconfig.base. Without them that test fails rather than skips, since a skipped
+// check reads as a passed one: run `npm ci` first.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
