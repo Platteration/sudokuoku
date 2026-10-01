@@ -4,7 +4,7 @@
  * This works because the game is deterministic in a specific way. The puzzle
  * comes from `generatePuzzle(createRng(seed), difficulty)`, and the shift that
  * fires after move N comes from `createRng(seed ^ (N * 0x9e3779b1))` — see
- * `shiftRng` in game.ts. Neither depends on which cell the player filled, so
+ * `shiftsFor` in game.ts. Neither depends on which cell the player filled, so
  * two people playing the same seed meet the same board and the same schedule
  * of shifts, however differently they play.
  *
@@ -94,7 +94,8 @@ class BitReader {
         this.overrun = true;
         return value;
       }
-      const bit = (this.bytes[this.index] >>> (7 - this.used)) & 1;
+      // index < length was checked just above.
+      const bit = (this.bytes[this.index]! >>> (7 - this.used)) & 1;
       value = (value << 1) | bit;
       if (++this.used === 8) {
         this.used = 0;
@@ -113,9 +114,10 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 function toBase64url(bytes: Uint8Array): string {
   let out = '';
   for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes[i];
-    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    // i < length is the loop's own bound; the other two are checked here.
+    const a = bytes[i]!;
+    const b = i + 1 < bytes.length ? bytes[i + 1]! : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2]! : 0;
     const chunk = (a << 16) | (b << 8) | c;
     const count = Math.min(3, bytes.length - i);
     out += ALPHABET[(chunk >>> 18) & 63];
@@ -161,7 +163,8 @@ function checksum(bytes: Uint8Array): number {
 // Encode and decode
 
 const MAX_GAP_SECONDS = 255;
-const MAX_MOVES = 1023;
+/** The most moves a ghost carries: the count is written in 10 bits. */
+export const MAX_GHOST_MOVES = 1023;
 const MAX_BYTES = 16384;
 
 export function encodeChallenge(challenge: Challenge): string {
@@ -189,7 +192,7 @@ export function encodeChallenge(challenge: Challenge): string {
   const ghost = challenge.ghost;
   w.write(ghost ? 1 : 0, 1);
   if (ghost) {
-    const moves = ghost.moves.slice(0, MAX_MOVES);
+    const moves = ghost.moves.slice(0, MAX_GHOST_MOVES);
     w.write(moves.length, 10);
     w.write(clamp(ghost.totalSeconds, 0, 65535), 16);
     w.write(clamp(ghost.hints, 0, 255), 8);
@@ -212,6 +215,9 @@ export function encodeChallenge(challenge: Challenge): string {
 }
 
 export function decodeChallenge(text: string): DecodeResult {
+  // A link can be any length; four characters carry three bytes, so anything
+  // past twice MAX_BYTES is refused before it is decoded rather than after.
+  if (text.length > MAX_BYTES * 2) return { ok: false, error: 'That code is too long to be a challenge.' };
   const bytes = fromBase64url(text);
   if (!bytes || bytes.length < 8 || bytes.length > MAX_BYTES) {
     return { ok: false, error: 'That code is not complete.' };
@@ -236,11 +242,8 @@ export function decodeChallenge(text: string): DecodeResult {
   }
 
   const seed = r.read(32) >>> 0;
-  const difficultyIndex = r.read(2);
-  if (difficultyIndex >= DIFFICULTIES.length) {
-    return { ok: false, error: 'That challenge uses an unknown difficulty.' };
-  }
-  const difficulty = DIFFICULTIES[difficultyIndex];
+  // Two bits name one of exactly four difficulties, so every value is one.
+  const difficulty = DIFFICULTIES[r.read(2)]!;
 
   const shiftMask = r.read(8);
   const enabledShifts: ShiftKind[] = ALL_SHIFT_KINDS.filter((_, i) => shiftMask & (1 << i));
@@ -255,10 +258,8 @@ export function decodeChallenge(text: string): DecodeResult {
 
   let ghost: GhostRun | undefined;
   if (r.read(1) === 1) {
+    // Ten bits cannot say more than MAX_GHOST_MOVES, which is why it is 1023.
     const count = r.read(10);
-    if (count > MAX_MOVES) {
-      return { ok: false, error: 'That challenge has too many moves.' };
-    }
     const totalSeconds = r.read(16);
     const hints = r.read(8);
     const moves: MoveRecord[] = [];

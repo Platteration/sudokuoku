@@ -3,7 +3,6 @@ import {
   CELLS,
   Difficulty,
   Grid,
-  findConflicts,
   generatePuzzle,
   isComplete,
 } from './sudoku';
@@ -13,13 +12,17 @@ import {
   ShiftKind,
   applyToGrid,
   applyToNotes,
+  joinDescriptions,
   permute,
   randomShift,
 } from './transforms';
+import { RULE_KEYS } from './presets';
 
 export type PhantomTarget = 'entries' | 'givens' | 'both';
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ShiftPreview = 'off' | 'category' | 'exact';
+/** Skip the decorative animation: as the system says, always, or never. */
+export type ReduceMotion = 'system' | 'on' | 'off';
 
 export interface Settings {
   difficulty: Difficulty;
@@ -41,8 +44,10 @@ export interface Settings {
   theme: ThemePreference;
   /** Colour pack id, see THEME_PACKS. */
   themePack: string;
-  /** Skip the slide, flash and pop animations. */
-  reduceMotion: boolean;
+  /** Skip the slide, flash and pop animations: follow the OS, or always, or never. */
+  reduceMotion: ReduceMotion;
+  /** A tap on select, a nudge on a shift, a buzz on a win. */
+  haptics: boolean;
   /** Phantom challenge: filled cells fade away and lock for a while. */
   phantomMode: boolean;
   /** Which filled cells may fade. */
@@ -70,7 +75,8 @@ export const DEFAULT_SETTINGS: Settings = {
   animateShifts: true,
   theme: 'system',
   themePack: 'classic',
-  reduceMotion: false,
+  reduceMotion: 'system',
+  haptics: true,
   phantomMode: false,
   phantomTarget: 'both',
   phantomEvery: 3,
@@ -104,6 +110,12 @@ export interface Phantom {
   unlocked?: boolean;
 }
 
+/**
+ * The shift a move applied. When a move fires several shifts at once
+ * (`shiftsPerMove`), this is the last one applied and its `description` names
+ * every shift of that move in order, so the banner and the screen reader
+ * report the whole move rather than only its final step.
+ */
 export interface ShiftEvent extends Shift {
   /** Move number after which the shift fired. */
   afterMove: number;
@@ -125,7 +137,8 @@ export interface MoveRecord {
   seconds: number;
 }
 
-interface Snapshot {
+/** The board and its counters: what an undo step restores. */
+interface Board {
   solution: Grid;
   given: boolean[];
   values: Grid;
@@ -143,13 +156,24 @@ interface Snapshot {
   phantomsRecalled: number;
   /** Phantom cells refilled with a different digit. */
   phantomsMissed: number;
-  /** Every board-changing move so far, oldest first. */
-  log: MoveRecord[];
+}
+
+interface Snapshot extends Board {
+  /**
+   * How long the replay log was when this snapshot was taken. The log only
+   * grows between snapshots, so an undo cuts it back to this length. A
+   * snapshot does not carry the log itself: every undo step stored a whole
+   * copy of it, which made a long game's save grow with the square of its
+   * moves (342 kB where main's own test holds a save under 200 kB).
+   */
+  logLength: number;
 }
 
 export type GameMode = 'free' | 'daily' | 'challenge';
 
-export interface GameState extends Snapshot {
+export interface GameState extends Board {
+  /** Every board-changing move so far, oldest first. */
+  log: MoveRecord[];
   seed: number;
   settings: Settings;
   /** Free play, or the once-a-day shared puzzle. */
@@ -238,18 +262,16 @@ function snapshot(s: GameState): Snapshot {
     phantomCount: s.phantomCount,
     phantomsRecalled: s.phantomsRecalled,
     phantomsMissed: s.phantomsMissed,
-    log: s.log,
+    logLength: s.log.length,
   };
 }
 
 /** Appends a move to the replay log. */
 function logMove(state: GameState, pos: number, digit: number): MoveRecord[] {
-  return [...state.log, { token: state.tokens[pos], digit, seconds: state.elapsed }];
-}
-
-/** Per-game RNG for shifts, advanced by move count so shifts are reproducible. */
-function shiftRng(state: GameState) {
-  return createRng((state.seed ^ (state.moves * 0x9e3779b1)) >>> 0);
+  const token = state.tokens[pos];
+  // Every caller passes a cell of the board, which always holds a token.
+  if (token === undefined) return state.log;
+  return [...state.log, { token, digit, seconds: state.elapsed }];
 }
 
 /** Separate stream for phantom picks so they never correlate with shifts. */
@@ -260,7 +282,9 @@ function phantomRng(state: GameState) {
 /** True while nothing may be entered in the cell. */
 export function isLocked(state: GameState, pos: number): boolean {
   const ph = state.phantoms[pos];
-  return ph !== null && !ph.unlocked && state.moves < ph.unlockAtMove;
+  // pos is a board position and phantoms has one entry per cell, so past the
+  // null check the record is there.
+  return ph !== null && !ph!.unlocked && state.moves < ph!.unlockAtMove;
 }
 
 /** Locked phantoms only; unlocked records awaiting recall do not count. */
@@ -288,7 +312,7 @@ function scoreRecall(
   if (ph === null) return state;
   const phantoms = state.phantoms.slice();
   phantoms[pos] = null;
-  const recalled = !fromHint && digit === ph.value;
+  const recalled = !fromHint && digit === ph!.value; // a board position: see isLocked
   return {
     ...state,
     phantoms,
@@ -349,8 +373,8 @@ function spawnPhantom(state: GameState, exclude: number | null, now: number): Ga
   const pos = pick(phantomRng(state), eligible);
   const phantom: Phantom = {
     id: state.phantomCount + 1,
-    value: state.values[pos],
-    wasGiven: state.given[pos],
+    value: state.values[pos]!,
+    wasGiven: state.given[pos]!,
     startedAt: now,
     fadeMs: phantomFadeMs,
     createdAtMove: state.moves,
@@ -385,10 +409,12 @@ export function applyShift(state: GameState, shift: Shift): GameState {
     values: applyToGrid(state.values, shift),
     notes: applyToNotes(state.notes, shift),
     tokens: permute(state.tokens, shift),
+    // A phantom's value is a digit: the engine takes it off the board, and
+    // saved.ts refuses a stored one that is not.
     phantoms: permute(state.phantoms, shift).map((ph) =>
-      ph === null ? null : { ...ph, value: shift.relabel[ph.value] },
+      ph === null ? null : { ...ph, value: shift.relabel[ph.value]! },
     ),
-    selected: state.selected === null ? null : shift.dest[state.selected],
+    selected: state.selected === null ? null : shift.dest[state.selected]!,
     lastShift: event,
     shiftCount: state.shiftCount + 1,
     version: state.version + 1,
@@ -421,17 +447,43 @@ function afterMove(
     if (moves % cadence === 0) s = spawnPhantom(s, changed, now);
   }
   s = ensurePlayable(s);
-  const every = Math.max(1, s.settings.shiftEvery);
-  if (moves % every === 0) {
-    const rng = shiftRng(s);
-    const count = Math.max(1, Math.min(4, s.settings.shiftsPerMove));
-    for (let i = 0; i < count; i++) {
-      const shift = randomShift(rng, s.settings.enabledShifts);
-      if (!shift) break;
-      s = applyShift(s, shift);
-    }
+  const fired = shiftsFor(s, moves);
+  for (const shift of fired) s = applyShift(s, shift);
+  // One move, one report: the event keeps the last shift's permutation but
+  // describes every shift the move fired.
+  if (fired.length > 1 && s.lastShift) {
+    s = {
+      ...s,
+      lastShift: { ...s.lastShift, description: joinDescriptions(fired.map((f) => f.description)) },
+    };
   }
   return s;
+}
+
+/**
+ * The shifts a move fires, drawn in order from the per-game stream keyed on
+ * that move number so they stay reproducible. `afterMove` performs them and
+ * `nextShifts` previews them, so both read the very same draws.
+ */
+function shiftsFor(state: GameState, moves: number): Shift[] {
+  const every = Math.max(1, state.settings.shiftEvery);
+  if (moves % every !== 0) return [];
+  const rng = createRng((state.seed ^ (moves * 0x9e3779b1)) >>> 0);
+  const count = Math.max(1, Math.min(4, state.settings.shiftsPerMove));
+  const out: Shift[] = [];
+  for (let i = 0; i < count; i++) {
+    const shift = randomShift(rng, state.settings.enabledShifts);
+    if (!shift) break;
+    out.push(shift);
+  }
+  return out;
+}
+
+/** A settings patch with every rule the daily fixes stripped out. */
+function withoutRules(patch: Partial<Settings>): Partial<Settings> {
+  const out = { ...patch };
+  for (const key of RULE_KEYS) delete out[key];
+  return out;
 }
 
 export function reduce(state: GameState, action: Action): GameState {
@@ -448,8 +500,13 @@ export function reduce(state: GameState, action: Action): GameState {
     case 'load':
       return action.state;
 
-    case 'updateSettings':
-      return { ...state, settings: { ...state.settings, ...action.settings } };
+    case 'updateSettings': {
+      // The daily is the same puzzle under the same rules for everyone, so a
+      // daily in progress ignores the rule keys. Appearance and assistance are
+      // the player's own and still apply.
+      const patch = state.mode === 'daily' ? withoutRules(action.settings) : action.settings;
+      return { ...state, settings: { ...state.settings, ...patch } };
+    }
 
     case 'newGame':
       return newGame({ ...state.settings, ...action.settings }, action.seed);
@@ -457,9 +514,11 @@ export function reduce(state: GameState, action: Action): GameState {
     case 'undo': {
       const prev = state.history[state.history.length - 1];
       if (!prev) return state;
+      const { logLength, ...board } = prev;
       return {
         ...state,
-        ...prev,
+        ...board,
+        log: state.log.slice(0, logLength),
         history: state.history.slice(0, -1),
         status: 'playing',
         version: state.version + 1,
@@ -475,7 +534,7 @@ export function reduce(state: GameState, action: Action): GameState {
       if (state.notesMode) {
         if (state.values[p] !== 0) return state;
         const notes = state.notes.slice();
-        notes[p] ^= 1 << d;
+        notes[p]! ^= 1 << d;
         return { ...state, notes, version: state.version + 1 };
       }
       if (state.values[p] === d) return state;
@@ -514,25 +573,15 @@ export function reduce(state: GameState, action: Action): GameState {
       const p = state.selected;
       if (state.status !== 'playing' || p === null || state.given[p]) return state;
       if (isLocked(state, p)) return state;
-      if (state.values[p] === state.solution[p]) return state;
+      const answer = state.solution[p]!;
+      if (state.values[p] === answer) return state;
       const values = state.values.slice();
-      values[p] = state.solution[p];
+      values[p] = answer;
       const notes = state.notes.slice();
       notes[p] = 0;
       return afterMove(
         state,
-        scoreRecall(
-          {
-            ...state,
-            values,
-            notes,
-            hintsUsed: state.hintsUsed + 1,
-            log: logMove(state, p, values[p]),
-          },
-          p,
-          values[p],
-          true,
-        ),
+        scoreRecall({ ...state, values, notes, hintsUsed: state.hintsUsed + 1, log: logMove(state, p, answer) }, p, answer, true),
         p,
         action.now ?? Date.now(),
       );
@@ -541,19 +590,16 @@ export function reduce(state: GameState, action: Action): GameState {
 }
 
 /**
- * The shift that will fire after the next move, or null when the next move
- * does not trigger one. This reads the very same seeded stream `afterMove`
- * will use, so the preview is exact rather than a guess. A move that
- * completes the puzzle ends the game before any shift, which no preview can
- * know in advance.
+ * Every shift the next move will fire, in order, or an empty list when the
+ * next move triggers none. This reads the very same seeded stream `afterMove`
+ * will use, so the preview is exact rather than a guess — and it is the whole
+ * move, not just its first shift, which is what a `shiftsPerMove` of 2 or more
+ * actually applies. A move that completes the puzzle ends the game before any
+ * shift, which no preview can know in advance.
  */
-export function nextShift(state: GameState): Shift | null {
-  if (state.status !== 'playing') return null;
-  const moves = state.moves + 1;
-  const every = Math.max(1, state.settings.shiftEvery);
-  if (moves % every !== 0) return null;
-  const rng = createRng((state.seed ^ (moves * 0x9e3779b1)) >>> 0);
-  return randomShift(rng, state.settings.enabledShifts);
+export function nextShifts(state: GameState): Shift[] {
+  if (state.status !== 'playing') return [];
+  return shiftsFor(state, state.moves + 1);
 }
 
 /** Positions that are filled but differ from the solution. */
@@ -565,14 +611,10 @@ export function mistakes(state: GameState): Set<number> {
   return out;
 }
 
-export { findConflicts };
-
 /** How many of each digit remain to be placed. */
 export function remainingCounts(state: GameState): number[] {
   const counts = new Array<number>(10).fill(9);
   counts[0] = 0;
-  for (const v of state.values) if (v !== 0) counts[v]--;
+  for (const v of state.values) if (v !== 0) counts[v]!--; // values are digits 0..9
   return counts;
 }
-
-export type { Difficulty, ShiftKind };

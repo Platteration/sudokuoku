@@ -19,7 +19,12 @@ export default function Sheet({ visible, title, onClose, children, footer }: Pro
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
         <View style={[styles.sheet, shadow(3, dark)]}>
           <View style={styles.grabber} />
           <View style={styles.header}>

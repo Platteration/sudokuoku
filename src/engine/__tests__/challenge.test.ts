@@ -34,7 +34,7 @@ function solve(state: GameState): GameState {
   let guard = 0;
   while (s.status === 'playing' && guard++ < 400) {
     const q = s.values.findIndex((v) => v === 0);
-    s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit: s.solution[q], now: 0 });
+    s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit: s.solution[q]!, now: 0 });
   }
   return s;
 }
@@ -129,6 +129,21 @@ describe('rejecting bad codes', () => {
       expect(out.error).toBeTruthy();
     }
   });
+
+  it('refuses a link far longer than any challenge before decoding it', () => {
+    // A link is text anyone can send. The longest real code is a full
+    // 1,023-move ghost, about 3.7 kB; this is a hundred times that.
+    const huge = 'A'.repeat(400_000);
+    const out = decodeChallenge(huge);
+    expect(out.ok).toBe(false);
+    expect(out.ok ? '' : out.error).toBe('That code is too long to be a challenge.');
+  });
+
+  it('carries the longest ghost the format allows', () => {
+    const moves = Array.from({ length: 1023 }, (_, i) => ({ token: i % 81, digit: (i % 9) + 1, seconds: i }));
+    const out = decodeChallenge(encodeChallenge(sample({ ghost: { moves, totalSeconds: 1023, hints: 0 } })));
+    expect(out.ok && out.challenge.ghost?.moves.length).toBe(1023);
+  });
 });
 
 describe('determinism: the property challenge links rest on', () => {
@@ -145,12 +160,12 @@ describe('determinism: the property challenge links rest on', () => {
       const pa = a.values.findIndex((v) => v === 0);
       a = reduce(reduce(a, { type: 'select', pos: pa }), {
         type: 'input',
-        digit: a.solution[pa],
+        digit: a.solution[pa]!,
         now: 0,
       });
 
       const pb = b.values.lastIndexOf(0);
-      const wrong = (b.solution[pb] % 9) + 1;
+      const wrong = (b.solution[pb]! % 9) + 1;
       b = reduce(reduce(b, { type: 'select', pos: pb }), { type: 'input', digit: wrong, now: 0 });
 
       // Same move number, so the same shift must have fired for both.
@@ -178,13 +193,13 @@ describe('determinism: the property challenge links rest on', () => {
       theme: 'dark' as const,
       themePack: 'terminal',
       showMistakes: true,
-      reduceMotion: true,
+      reduceMotion: 'on' as const,
     };
     const settings = challengeSettings(mine, sample());
     expect(settings.theme).toBe('dark');
     expect(settings.themePack).toBe('terminal');
     expect(settings.showMistakes).toBe(true);
-    expect(settings.reduceMotion).toBe(true);
+    expect(settings.reduceMotion).toBe('on');
   });
 
   it('starts a challenge in challenge mode on the encoded seed', () => {
@@ -263,7 +278,7 @@ describe('the move log', () => {
     expect(s.log).toEqual([]);
 
     const p = s.values.findIndex((v, i) => v === 0 && !s.given[i]);
-    const token = s.tokens[p];
+    const token = s.tokens[p]!;
     s = reduce(reduce(s, { type: 'select', pos: p }), { type: 'input', digit: 4, now: 0 });
     expect(s.log).toEqual([{ token, digit: 4, seconds: 0 }]);
 
@@ -273,7 +288,7 @@ describe('the move log', () => {
 
     s = reduce(reduce(s, { type: 'select', pos: p }), { type: 'hint', now: 0 });
     expect(s.log).toHaveLength(3);
-    expect(s.log[2].digit).toBe(s.solution[s.tokens.indexOf(token)]);
+    expect(s.log[2]!.digit).toBe(s.solution[s.tokens.indexOf(token)]!);
 
     s = reduce(s, { type: 'undo' });
     expect(s.log).toHaveLength(2);
@@ -293,7 +308,7 @@ describe('the move log', () => {
     s = reduce(s, { type: 'tick' });
     const p = s.values.findIndex((v) => v === 0);
     s = reduce(reduce(s, { type: 'select', pos: p }), { type: 'input', digit: 1, now: 0 });
-    expect(s.log[0].seconds).toBe(2);
+    expect(s.log[0]!.seconds).toBe(2);
   });
 
   it('carries every shift kind through an encode and decode', () => {

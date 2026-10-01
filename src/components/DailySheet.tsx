@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   DailyConfig,
   Profile,
-  currentStreak,
+  profileStreak,
   shareText,
   shiftDateKey,
   parseDateKey,
@@ -41,7 +41,7 @@ function untilMidnight(): string {
 export default function DailySheet(p: Props) {
   const styles = useStyles(makeStyles);
   const result = p.profile.daily[p.todayKey];
-  const streak = currentStreak(p.profile.daily, p.todayKey, p.profile.frozenDays);
+  const streak = profileStreak(p.profile, p.todayKey);
   const week = Array.from({ length: 7 }, (_, i) => shiftDateKey(p.todayKey, i - 6));
 
   return (
@@ -123,7 +123,7 @@ export default function DailySheet(p: Props) {
                   isToday && !done && styles.dotToday,
                 ]}
               >
-                <Text style={[styles.dotText, done && styles.dotTextDone]}>
+                <Text style={[styles.dotText, frozen && styles.dotTextFrozen, done && styles.dotTextDone]}>
                   {done ? '✓' : frozen ? '❄' : ''}
                 </Text>
               </View>
@@ -136,7 +136,7 @@ export default function DailySheet(p: Props) {
       </View>
       <Text style={styles.next}>
         Next daily in {untilMidnight()}. Miss a day and a freeze covers it, if you have one. You
-        get one freeze a month, up to three.
+        get one freeze a month, up to three. Your streak is kept on this device, by its clock.
       </Text>
     </Sheet>
   );
@@ -268,8 +268,13 @@ const makeStyles = (colors: Colors) =>
       color: colors.textMuted,
       fontWeight: '700',
     },
+    dotTextFrozen: {
+      color: colors.primary,
+    },
     dotTextDone: {
-      color: '#fff',
+      // The done dot is filled with `success`, which is a light green in the
+      // dark packs: the colour drawn on `primary` is the one that reads on it.
+      color: colors.onPrimary,
     },
     dayLetter: {
       marginTop: 4,

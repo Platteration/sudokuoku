@@ -46,10 +46,10 @@ export const PEERS: number[][] = (() => {
 
 /** True when no row, column or box contains a repeated non-zero digit. */
 export function isValidGrid(grid: Grid): boolean {
-  for (let p = 0; p < CELLS; p++) {
+  for (const [p, peers] of PEERS.entries()) {
     const v = grid[p];
     if (v === 0) continue;
-    for (const q of PEERS[p]) if (grid[q] === v) return false;
+    for (const q of peers) if (grid[q] === v) return false;
   }
   return true;
 }
@@ -61,10 +61,10 @@ export function isComplete(grid: Grid): boolean {
 /** Positions that currently clash with a peer holding the same digit. */
 export function findConflicts(grid: Grid): Set<number> {
   const out = new Set<number>();
-  for (let p = 0; p < CELLS; p++) {
+  for (const [p, peers] of PEERS.entries()) {
     const v = grid[p];
     if (v === 0) continue;
-    for (const q of PEERS[p]) {
+    for (const q of peers) {
       if (grid[q] === v) {
         out.add(p);
         out.add(q);
@@ -77,7 +77,8 @@ export function findConflicts(grid: Grid): Set<number> {
 /** Bitmask of digits that may legally go in p given the current grid. */
 export function candidates(grid: Grid, p: number): number {
   let used = 0;
-  for (const q of PEERS[p]) if (grid[q] !== 0) used |= 1 << grid[q];
+  // p and its peers are board positions, and a grid holds CELLS digits.
+  for (const q of PEERS[p]!) if (grid[q] !== 0) used |= 1 << grid[q]!;
   return ~used & 0x3fe; // bits 1..9
 }
 
@@ -202,7 +203,7 @@ export function generatePuzzle(rng: Rng, difficulty: Difficulty): Puzzle {
   const order = shuffle(rng, Array.from({ length: CELLS }, (_, i) => i));
   for (const p of order) {
     if (remaining <= target) break;
-    const saved = clues[p];
+    const saved = clues[p]!; // order is a permutation of the positions
     clues[p] = 0;
     if (countSolutions(clues, 2) === 1) {
       remaining--;

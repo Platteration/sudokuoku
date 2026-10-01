@@ -9,6 +9,7 @@ import {
   bandRowsShift,
   bandsShift,
   boxSlideShift,
+  joinDescriptions,
   mirrorShift,
   permute,
   randomShift,
@@ -98,7 +99,7 @@ describe('shift geometry', () => {
     const s = boxSlideShift(1, 2);
     for (let p = 0; p < CELLS; p++) {
       const box = (q: number) => Math.floor(Math.floor(q / 9) / 3) * 3 + Math.floor((q % 9) / 3);
-      expect(box(s.dest[p])).toBe(box(p));
+      expect(box(s.dest[p]!)).toBe(box(p));
     }
   });
   it('relabel wraps 9 to 1 and moves notes along', () => {
@@ -152,6 +153,23 @@ describe('permute', () => {
     const s = stacksShift(1);
     const ids = Array.from({ length: CELLS }, (_, i) => i);
     const moved = permute(ids, s);
-    for (let p = 0; p < CELLS; p++) expect(moved[s.dest[p]]).toBe(p);
+    for (let p = 0; p < CELLS; p++) expect(moved[s.dest[p]!]).toBe(p);
+  });
+});
+
+describe('describing a move', () => {
+  it('reads several shifts of one move as one sentence', () => {
+    // A move may fire up to four shifts; the banner and the screen reader get
+    // one line, so it has to name all of them in the order they happened.
+    expect(
+      joinDescriptions([rotateShift(1).description, bandRowsShift(1, 1).description]),
+    ).toBe('Board rotated clockwise, then rows 4–6 slid down 1');
+  });
+
+  it('leaves a single shift exactly as it was written', () => {
+    expect(joinDescriptions([mirrorShift('diagonal').description])).toBe(
+      mirrorShift('diagonal').description,
+    );
+    expect(joinDescriptions([])).toBe('');
   });
 });

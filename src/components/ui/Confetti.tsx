@@ -56,7 +56,7 @@ export default function Confetti({ runKey, width, active, reduceMotion }: Props)
     <View pointerEvents="none" style={styles.layer}>
       {pieces.map((p) => {
         // Each piece starts a little later, so the burst arrives in waves.
-        const span = [p.delay, Math.min(1, p.delay + 0.65)];
+        const span: [number, number] = [p.delay, Math.min(1, p.delay + 0.65)];
         return (
           <Animated.View
             key={p.key}

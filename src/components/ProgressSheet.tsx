@@ -6,8 +6,9 @@ import {
   CLEAN_HINT_LIMIT,
   Difficulty,
   Profile,
-  currentStreak,
   levelInfo,
+  profileStreak,
+  unlockedBadges,
 } from '../engine';
 import { Colors, radius, useStyles } from '../theme';
 import { formatTime } from '../utils/time';
@@ -34,8 +35,11 @@ const GROUPS: { key: Badge['group']; title: string }[] = [
 export default function ProgressSheet({ visible, profile, todayKey, onClose, onReset }: Props) {
   const styles = useStyles(makeStyles);
   const level = levelInfo(profile.xp);
-  const streak = currentStreak(profile.daily, todayKey);
-  const unlocked = Object.keys(profile.badges).length;
+  const streak = profileStreak(profile, todayKey);
+  // Counted from the badges this build has, never from the size of the stored
+  // map: a profile keeps ids it does not know (a later build's, a renamed
+  // one) rather than deleting them, and those are not part of "7 of 24".
+  const unlocked = unlockedBadges(profile).length;
   const pct = level.span > 0 ? Math.min(1, level.into / level.span) : 1;
 
   return (
@@ -106,7 +110,7 @@ export default function ProgressSheet({ visible, profile, todayKey, onClose, onR
         return (
           <View key={d} style={styles.card}>
             <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{d[0].toUpperCase() + d.slice(1)}</Text>
+              <Text style={styles.cardTitle}>{d.charAt(0).toUpperCase() + d.slice(1)}</Text>
               <Text style={styles.cardMeta}>
                 {s.won}/{s.played} won
                 {s.won > 0 ? ` · ${s.cleanWins} unaided` : ''}

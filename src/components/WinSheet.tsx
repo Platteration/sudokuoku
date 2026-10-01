@@ -18,6 +18,7 @@ interface Props {
   onChallenge?: () => void;
   /** The opponent's recorded solve, when this win was a challenge. */
   ghost?: GhostRun | null;
+  reduceMotion?: boolean;
 }
 
 function Stat({ label, value, styles }: { label: string; value: string; styles: ReturnType<typeof makeStyles> }) {
@@ -38,6 +39,7 @@ export default function WinSheet({
   onShare,
   onChallenge,
   ghost,
+  reduceMotion,
 }: Props) {
   const styles = useStyles(makeStyles);
   const { width } = useWindowDimensions();
@@ -77,7 +79,7 @@ export default function WinSheet({
         runKey={state.seed}
         width={width}
         active={visible}
-        reduceMotion={state.settings.reduceMotion}
+        reduceMotion={reduceMotion}
       />
       <Text style={styles.lead}>
         {daily
@@ -133,7 +135,7 @@ export default function WinSheet({
       ) : null}
 
       <Text style={styles.meta}>
-        {state.settings.difficulty[0].toUpperCase() + state.settings.difficulty.slice(1)} · {daily ? `daily ${state.dailyKey}` : `seed ${state.seed}`}
+        {state.settings.difficulty.charAt(0).toUpperCase() + state.settings.difficulty.slice(1)} · {daily ? `daily ${state.dailyKey}` : `seed ${state.seed}`}
       </Text>
     </Sheet>
   );

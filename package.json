@@ -8,9 +8,12 @@
     "@react-native-async-storage/async-storage": "^2.2.0",
     "expo": "~57.0.20",
     "expo-clipboard": "~57.0.1",
+    "expo-constants": "~57.0.17",
     "expo-haptics": "~57.0.2",
     "expo-linking": "~57.0.9",
+    "expo-splash-screen": "~57.0.8",
     "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.3",
     "react": "19.2.3",
     "react-dom": "^19.2.3",
     "react-native": "0.86.3",
@@ -19,6 +22,9 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~57.0.2",
+    "globals": "^16.0.0",
     "typescript": "~6.0.3",
     "vitest": "^3.2.7"
   },
@@ -29,9 +35,15 @@
     "web": "expo start --web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run test"
+    "test:conventions": "node --test test/conventions.mjs",
+    "check": "npm run lint && npm run typecheck && npm test && npm run test:conventions"
   },
   "private": true,
-  "description": "Sudoku that shifts under you after every move, and stays solvable."
+  "description": "Sudoku that shifts under you after every move, and stays solvable.",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
 }

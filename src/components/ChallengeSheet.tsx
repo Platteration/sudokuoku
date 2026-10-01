@@ -25,9 +25,16 @@ interface Props {
   onShare: (text: string) => void;
 }
 
-/** Builds the link and the plain code for a challenge. */
+/**
+ * The link for a challenge, in the app's own scheme, which the app opens.
+ *
+ * It used to be an https link on sudokuoku.app. Nothing in this project
+ * serves that name and the app declares no associated domain, so such a link
+ * never opened the app: every invite sent its recipient to whoever holds the
+ * name. The code printed below the link works everywhere.
+ */
 export function challengeLink(code: string): string {
-  return `https://sudokuoku.app/c/${code}`;
+  return `sudokuoku://c/${code}`;
 }
 
 function inviteText(code: string, withGhost: boolean): string {
@@ -53,11 +60,12 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
     const trimmed = raw.trim();
     if (!trimmed) return '';
     const fromQuery = /[?&#]code=([^&#]+)/.exec(trimmed);
-    if (fromQuery) {
+    const fromQueryCode = fromQuery?.[1];
+    if (fromQueryCode !== undefined) {
       try {
-        return decodeURIComponent(fromQuery[1]);
+        return decodeURIComponent(fromQueryCode);
       } catch {
-        return fromQuery[1];
+        return fromQueryCode;
       }
     }
     const afterSlash = trimmed.lastIndexOf('/') >= 0 ? trimmed.slice(trimmed.lastIndexOf('/') + 1) : trimmed;
@@ -119,7 +127,7 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
         <View style={styles.card}>
           <Text style={styles.cardTitle}>You are playing a challenge</Text>
           <Text style={styles.cardText}>
-            {active.difficulty[0].toUpperCase() + active.difficulty.slice(1)} · seed{' '}
+            {active.difficulty.charAt(0).toUpperCase() + active.difficulty.slice(1)} · seed{' '}
             {active.seed}
           </Text>
           {active.ghost ? (

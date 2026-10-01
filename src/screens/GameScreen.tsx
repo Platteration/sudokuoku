@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
@@ -40,41 +39,48 @@ import {
   Profile,
   Settings,
   WinOutcome,
-  currentStreak,
   dailyConfig,
   dailySeed,
   dailySettings,
   dateKey,
   emptyProfile,
+  isDailyStale,
   isLocked,
+  isTodaysDaily,
   newGame,
-  nextShift,
+  nextShifts,
+  profileStreak,
   recordGameStart,
   recordGameWin,
   refreshStreak,
   reduce,
   remainingCounts,
   shareText,
+  todaysDailyInProgress,
 } from '../engine';
 import {
   clearChallengeGame,
   clearDailyGame,
   clearProfile,
-  hasSeenHelp,
   loadChallengeCode,
   loadChallengeGame,
   loadDailyGame,
   loadGame,
   loadProfile,
-  markHelpSeen,
+  loadSharedSettings,
   saveChallengeCode,
   saveChallengeGame,
   saveDailyGame,
   saveGame,
   saveProfile,
+  saveSharedSettings,
 } from '../storage';
+import { confirmAction, notify } from '../confirm';
+import { haptic, setHapticsEnabled } from '../haptics';
+import { useReduceMotion } from '../motion';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
 import { describeShift } from '../utils/describe';
+import { applyShared, pickShared } from '../utils/saved';
 import { formatTime } from '../utils/time';
 
 interface Loaded {
@@ -83,37 +89,12 @@ interface Loaded {
   challenge: GameState | null;
   challengeInfo: Challenge | null;
   profile: Profile;
-  firstLaunch: boolean;
-}
-
-/** Settings that follow the player across free and daily games. */
-const SHARED_SETTING_KEYS: (keyof Settings)[] = [
-  'highlightConflicts',
-  'showMistakes',
-  'animateShifts',
-  'theme',
-  'themePack',
-  'shiftPreview',
-  'reduceMotion',
-  'phantomMarkers',
-  'phantomFadeMs',
-];
-
-function pickShared(settings: Settings): Partial<Settings> {
-  const out: Partial<Settings> = {};
-  for (const k of SHARED_SETTING_KEYS) (out as Record<string, unknown>)[k] = settings[k];
-  return out;
-}
-
-function haptic(kind: 'shift' | 'win' | 'tap') {
-  if (Platform.OS === 'web') return;
-  const run =
-    kind === 'shift'
-      ? Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-      : kind === 'win'
-        ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        : Haptics.selectionAsync();
-  run.catch(() => undefined);
+  /**
+   * Whether the introduction has been read; it opens by itself until it has.
+   * Null when the store could not be read: it stays closed for this launch,
+   * and nothing about it is written until the player closes it.
+   */
+  seenIntro: boolean | null;
 }
 
 export default function GameScreen() {
@@ -125,16 +106,19 @@ export default function GameScreen() {
       loadGame(),
       loadDailyGame(),
       loadProfile(),
-      hasSeenHelp(),
+      loadSharedSettings(),
       loadChallengeGame(),
       loadChallengeCode(),
     ]).then(
-      ([savedFree, savedDaily, loadedProfile, seenHelp, savedChallenge, challengeCode]) => {
+      ([savedFree, savedDaily, loadedProfile, shared, savedChallenge, challengeCode]) => {
         if (cancelled) return;
         // Grant the monthly freeze and spend one if a missed day can be saved.
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
         if (profile !== loadedProfile) saveProfile(profile);
         let free: GameState;
+        // Only the daily slot is tested for staleness below, so the free slot
+        // must not be able to hold a daily: readSavedGame takes the kind of
+        // game from the slot it was read out of rather than from the save.
         if (savedFree && savedFree.status === 'playing') {
           free = savedFree;
         } else {
@@ -146,7 +130,7 @@ export default function GameScreen() {
         // A daily from another day, or one already finished, is discarded.
         const today = dateKey(new Date());
         let daily: GameState | null = null;
-        if (savedDaily && savedDaily.dailyKey === today && savedDaily.status === 'playing') {
+        if (savedDaily && !isDailyStale(savedDaily, today) && savedDaily.status === 'playing') {
           daily = savedDaily;
         } else if (savedDaily) {
           clearDailyGame();
@@ -162,7 +146,12 @@ export default function GameScreen() {
         } else if (savedChallenge) {
           clearChallengeGame();
         }
-        setLoaded({ free, daily, challenge, challengeInfo, profile, firstLaunch: !seenHelp });
+        // Appearance and assistance are the player's, not the game's: they
+        // are stored on their own and overlaid on whichever game is restored.
+        free = { ...free, settings: applyShared(free.settings, shared.settings) };
+        if (daily) daily = { ...daily, settings: applyShared(daily.settings, shared.settings) };
+        if (challenge) challenge = { ...challenge, settings: applyShared(challenge.settings, shared.settings) };
+        setLoaded({ free, daily, challenge, challengeInfo, profile, seenIntro: shared.seenIntro });
       },
     );
     return () => {
@@ -218,7 +207,8 @@ function GameView({
   const [profile, setProfile] = useState<Profile>(initial.profile);
   const [outcome, setOutcome] = useState<WinOutcome | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showHelp, setShowHelp] = useState(initial.firstLaunch);
+  const [showHelp, setShowHelp] = useState(initial.seenIntro === false);
+  const [seenIntro, setSeenIntro] = useState<boolean | null>(initial.seenIntro);
   const [showWin, setShowWin] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [showDaily, setShowDaily] = useState(false);
@@ -237,11 +227,12 @@ function GameView({
   const config = dailyConfig(todayKey);
   const isDaily = state.mode === 'daily';
   const isChallenge = state.mode === 'challenge';
+  // Mode alone does not say whether the board on screen is *today's* daily:
+  // the app can sit open across local midnight. Everything the daily card and
+  // its button say has to be answered for today, not for the mode.
+  const onTodaysDaily = isTodaysDaily(state, todayKey);
   const dailyDone = !!profile.daily[todayKey];
-  const parkedDaily = parked.current.daily;
-  const dailyInProgress = isDaily
-    ? state.status === 'playing'
-    : !!parkedDaily && parkedDaily.dailyKey === todayKey && parkedDaily.status === 'playing';
+  const dailyInProgress = todaysDailyInProgress(state, parked.current.daily ?? null, todayKey);
 
   const updateProfile = useCallback((next: Profile) => {
     setProfile(next);
@@ -288,6 +279,23 @@ function GameView({
     if (state.elapsed > 0 && state.elapsed % 10 === 0) persist(state);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.elapsed]);
+  // The shared settings are kept outside both games, so a change made while
+  // the daily is on screen still survives a restart and a switch. The intro
+  // flag travels in the same record, so it is written from here as well —
+  // once it is known; an unknown one leaves the record's own flag in place.
+  useEffect(() => {
+    saveSharedSettings({ settings: pickShared(state.settings), seenIntro });
+  }, [state.settings, seenIntro]);
+
+  // The preference is three-way; what the animations need is a yes or no,
+  // and 'system' means following the device's own answer as it changes.
+  const reduceMotion = useReduceMotion(state.settings.reduceMotion);
+
+  // Haptics are gated by a module flag so every call site stays a one-liner.
+  // Declared before the effects that fire one, so the flag is right first.
+  useEffect(() => {
+    setHapticsEnabled(state.settings.haptics);
+  }, [state.settings.haptics]);
 
   // Feedback when a shift lands. The board rearranging is invisible to a
   // screen reader, so it is spoken as well as felt.
@@ -339,11 +347,12 @@ function GameView({
 
   /**
    * Stores the on-screen game so it can be returned to. A finished daily or
-   * challenge is discarded instead: neither can be replayed.
+   * challenge is discarded instead, and so is a daily whose day has gone:
+   * none of them can be played on.
    */
   const park = useCallback(
     (s: GameState) => {
-      if (s.mode !== 'free' && s.status !== 'playing') {
+      if (s.mode !== 'free' && (s.status !== 'playing' || isDailyStale(s, todayKey))) {
         delete parked.current[s.mode];
         if (s.mode === 'daily') clearDailyGame();
         else clearChallengeGame();
@@ -352,7 +361,7 @@ function GameView({
       persist(s);
       parked.current[s.mode] = s;
     },
-    [persist],
+    [persist, todayKey],
   );
 
   /** Puts a game on screen, clearing anything left over from the last one. */
@@ -369,8 +378,10 @@ function GameView({
   /** Swaps the on-screen game for the one parked under `mode`. */
   const switchTo = useCallback(
     (mode: GameMode): void => {
-      if (state.mode === mode) return;
-      const waiting = parked.current[mode];
+      // Midnight can pass with the app open, and then "play today's daily"
+      // while yesterday's is on screen is a real switch, not a no-op.
+      if (state.mode === mode && !isDailyStale(state, todayKey)) return;
+      const waiting = state.mode === mode ? undefined : parked.current[mode];
       park(state);
       const shared = pickShared(state.settings);
 
@@ -412,7 +423,7 @@ function GameView({
       updateProfile(recordGameStart(profile, next.settings.difficulty));
       show(next);
     },
-    [state, profile, park, show, updateProfile],
+    [state, profile, park, show, updateProfile, setChallengeInfo],
   );
 
   /** Always starts a fresh *free* game, parking whatever was on screen. */
@@ -442,26 +453,28 @@ function GameView({
       startNewGame();
       return;
     }
-    Alert.alert('Start a new free game?', 'Your current free game will be lost.', [
-      { text: 'Keep playing', style: 'cancel' },
-      { text: 'New game', style: 'destructive', onPress: () => startNewGame() },
-    ]);
+    confirmAction({
+      title: 'Start a new free game?',
+      message: 'Your current free game will be lost.',
+      cancelLabel: 'Keep playing',
+      confirmLabel: 'New game',
+      onConfirm: () => startNewGame(),
+    });
   };
 
   const shareDaily = async () => {
     const result = profile.daily[todayKey];
     if (!result) return;
-    await shareMessage(shareText(result, currentStreak(profile.daily, todayKey, profile.frozenDays)));
+    await shareMessage(shareText(result, profileStreak(profile, todayKey)));
   };
 
   const closeHelp = () => {
     setShowHelp(false);
-    markHelpSeen();
+    setSeenIntro(true);
   };
 
   // A tapped challenge link, whether it cold-started the app or arrived while
-  // it was already open. The code is the last path segment of either
-  // sudokuoku://c/<code> or https://<host>/c/<code>.
+  // it was already open: sudokuoku://c/<code>, the link challengeLink writes.
   const openChallengeRef = useRef(openChallenge);
   openChallengeRef.current = openChallenge;
 
@@ -489,7 +502,7 @@ function GameView({
       if (result.ok) {
         openChallengeRef.current(result.challenge);
       } else {
-        Alert.alert('That challenge could not be opened', result.error);
+        notify('That challenge could not be opened', result.error);
       }
     };
 
@@ -508,7 +521,7 @@ function GameView({
   const phantomJustSpawned =
     state.lastPhantom !== null && state.lastPhantom.createdAtMove === state.moves && activePhantoms > 0;
   const difficultyLabel =
-    state.settings.difficulty[0].toUpperCase() + state.settings.difficulty.slice(1);
+    state.settings.difficulty.charAt(0).toUpperCase() + state.settings.difficulty.slice(1);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
@@ -531,7 +544,7 @@ function GameView({
             name="daily"
             label="Daily challenge"
             badge={!dailyDone}
-            active={isDaily}
+            active={onTodaysDaily}
             onPress={() => setShowDaily(true)}
           />
           <IconButton
@@ -557,8 +570,8 @@ function GameView({
         shift={state.lastShift}
         shiftCount={state.shiftCount}
         moves={state.moves}
-        reduceMotion={state.settings.reduceMotion}
-        next={state.settings.shiftPreview === 'off' ? null : nextShift(state)}
+        reduceMotion={reduceMotion}
+        next={state.settings.shiftPreview === 'off' ? [] : nextShifts(state)}
         preview={state.settings.shiftPreview}
       />
 
@@ -586,6 +599,7 @@ function GameView({
         <Board
           state={state}
           size={boardSize}
+          reduceMotion={reduceMotion}
           onSelect={(pos) => {
             haptic('tap');
             send({ type: 'select', pos });
@@ -621,14 +635,14 @@ function GameView({
         onNewGame={(difficulty) => startNewGame(difficulty)}
         onHelp={() => setShowHelp(true)}
       />
-      <HelpSheet visible={showHelp} reduceMotion={state.settings.reduceMotion} onClose={closeHelp} />
+      <HelpSheet visible={showHelp} reduceMotion={reduceMotion} onClose={closeHelp} />
       <DailySheet
         visible={showDaily}
         todayKey={todayKey}
         config={config}
         profile={profile}
         inProgress={dailyInProgress}
-        active={isDaily}
+        active={onTodaysDaily}
         onClose={() => setShowDaily(false)}
         onPlay={() => switchTo('daily')}
         onShare={(text) => shareMessage(text)}
@@ -647,17 +661,17 @@ function GameView({
         todayKey={todayKey}
         onClose={() => setShowProgress(false)}
         onReset={() => {
-          Alert.alert('Reset progress?', 'Statistics, XP, badges and daily history will be erased. This cannot be undone.', [
-            { text: 'Keep', style: 'cancel' },
-            {
-              text: 'Reset',
-              style: 'destructive',
-              onPress: () => {
-                clearProfile();
-                setProfile(emptyProfile());
-              },
+          confirmAction({
+            title: 'Reset progress?',
+            message:
+              'Statistics, XP, badges and daily history will be erased. This cannot be undone.',
+            cancelLabel: 'Keep',
+            confirmLabel: 'Reset',
+            onConfirm: () => {
+              clearProfile();
+              setProfile(emptyProfile());
             },
-          ]);
+          });
         }}
       />
       <WinSheet
@@ -669,6 +683,7 @@ function GameView({
         onShare={isDaily ? shareDaily : undefined}
         onChallenge={isDaily ? undefined : () => setShowChallenge(true)}
         ghost={isChallenge ? challengeInfo?.ghost ?? null : null}
+        reduceMotion={reduceMotion}
       />
     </View>
   );
@@ -693,6 +708,12 @@ async function shareMessage(message: string): Promise<void> {
   try {
     await Share.share({ message });
   } catch {
+    // Sharing rejects in every browser without navigator.share, which is where
+    // the Alert fallback would be a no-op as well.
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') window.alert(message);
+      return;
+    }
     Alert.alert('Your result', message);
   }
 }

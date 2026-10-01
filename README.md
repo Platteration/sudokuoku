@@ -26,7 +26,10 @@ set in `app.json`.
 ## Challenge a friend
 
 Any board can be handed to someone else as a short code or a link. There is no
-server involved: the whole challenge travels inside the string.
+server involved: the whole challenge travels inside the string. The link is
+`sudokuoku://c/<code>`, which opens the app where it is installed; the invite
+carries the bare code too, for messengers that do not turn that into a link,
+and the challenge sheet takes either one pasted in.
 
 This works because the game is deterministic in a particular way. The puzzle is
 `generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
@@ -58,19 +61,22 @@ describe it. Every cell announces its contents as well as its coordinates
 ("Row 3, column 5, 7, given" / "empty, noted 1, 5 and 7" / "faded and locked
 for 3 more moves"), and each shift and each fading digit is announced through
 `AccessibilityInfo`, so the movement is not silent. A colourblind-safe High
-contrast pack and a reduce motion switch are in Settings.
+contrast pack and a Reduce motion control (system, on or off) are in Settings.
 
-## Checks
+## Development
 
 ```bash
-npm run typecheck  # tsc --noEmit
-npm test           # vitest: generator, solver, every shift, phantoms, the game reducer
-npm run check      # both
+npm run lint              # eslint (the shared Expo preset, eslint.config.js)
+npm run typecheck         # tsc --noEmit
+npm test                  # vitest: generator, solver, every shift, phantoms, the game reducer
+npm run test:conventions  # the shared repository conventions (CONVENTIONS.md)
+npm run check             # all of the above: the gate before a push
 ```
 
 GitHub Actions runs the same checks plus an Android and web Metro bundle on
-every push (`.github/workflows/ci.yml`). `eas.json` carries development,
-preview (Android APK) and production build profiles.
+every push (`.github/workflows/ci.yml`); a separate job runs
+`npm audit --omit=dev --audit-level=high` against the lockfile. `eas.json`
+carries development, preview (Android APK) and production build profiles.
 
 ## How the shifting works
 
@@ -195,10 +201,11 @@ so the movement can be watched rather than read about. It is driven by the
 real transforms, so it shows exactly what the game does.
 
 Undo rewinds the shift together with the move. Everything is saved locally:
-the free game, the daily in progress, and the profile with statistics, XP,
-badges, streak freezes and daily history.
+the free game, the daily in progress, the profile with statistics, XP, badges,
+streak freezes and daily history, and the appearance and assistance
+preferences, which belong to the player rather than to either game.
 
-## Code layout
+## Project layout
 
 ```
 App.tsx                     entry: safe-area provider + game screen

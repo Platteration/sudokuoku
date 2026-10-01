@@ -12,12 +12,15 @@ import {
   rowOf,
 } from '../engine';
 import { Colors, useStyles, useTheme } from '../theme';
+import { cellContent } from '../utils/cellContent';
 import { describeCell } from '../utils/describe';
 
 interface Props {
   state: GameState;
   size: number;
   onSelect: (pos: number) => void;
+  /** The motion preference, already resolved against the system's answer. */
+  reduceMotion?: boolean;
 }
 
 const SHIFT_MS = 420;
@@ -35,23 +38,23 @@ function fadeProgress(ph: Phantom, now: number): number {
  * across shifts, so when the board shifts each token glides from its old
  * spot to its new one.
  */
-export default function Board({ state, size, onSelect }: Props) {
+export default function Board({ state, size, onSelect, reduceMotion = false }: Props) {
   const { colors } = useTheme();
   const styles = useStyles(makeStyles);
   const cell = size / 9;
-  const { tokens, values, given, notes, selected, settings, phantoms, moves, lastShift } = state;
+  const { tokens, values, given, selected, settings, phantoms, moves, lastShift } = state;
 
   // Cells that just received a moved digit flash briefly after each shift.
   const flash = useRef(new Animated.Value(0)).current;
   const lastFlashed = useRef(state.shiftCount);
   const movedTo = useMemo(() => {
     const set = new Set<number>();
-    if (!lastShift || settings.reduceMotion) return set;
+    if (!lastShift || reduceMotion) return set;
     lastShift.dest.forEach((to, from) => {
       if (to !== from) set.add(to);
     });
     return set;
-  }, [lastShift, settings.reduceMotion]);
+  }, [lastShift, reduceMotion]);
   useEffect(() => {
     if (state.shiftCount === lastFlashed.current) return;
     lastFlashed.current = state.shiftCount;
@@ -99,11 +102,13 @@ export default function Board({ state, size, onSelect }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phantoms]);
 
+  // One animated position per token. tokens is a permutation of the cells
+  // (saved.ts refuses a save whose tokens are not), so every token indexes one.
   const positions = useRef<Animated.ValueXY[] | null>(null);
   if (positions.current === null) {
     positions.current = Array.from({ length: CELLS }, () => new Animated.ValueXY());
     tokens.forEach((token, pos) => {
-      positions.current![token].setValue({ x: colOf(pos) * cell, y: rowOf(pos) * cell });
+      positions.current![token]!.setValue({ x: colOf(pos) * cell, y: rowOf(pos) * cell });
     });
   }
   const prevCell = useRef(cell);
@@ -115,8 +120,8 @@ export default function Board({ state, size, onSelect }: Props) {
     const tokensChanged = prevTokens.current !== tokens;
     tokens.forEach((token, pos) => {
       const target = { x: colOf(pos) * cell, y: rowOf(pos) * cell };
-      const v = positions.current![token];
-      if (tokensChanged && settings.animateShifts && !settings.reduceMotion && !sizeChanged) {
+      const v = positions.current![token]!;
+      if (tokensChanged && settings.animateShifts && !reduceMotion && !sizeChanged) {
         anims.push(
           Animated.timing(v, {
             toValue: target,
@@ -132,7 +137,7 @@ export default function Board({ state, size, onSelect }: Props) {
     prevCell.current = cell;
     prevTokens.current = tokens;
     if (anims.length) Animated.parallel(anims).start();
-  }, [tokens, cell, settings.animateShifts, settings.reduceMotion]);
+  }, [tokens, cell, settings.animateShifts, reduceMotion]);
 
   const conflicts = useMemo(
     () => (settings.highlightConflicts ? findConflicts(values) : new Set<number>()),
@@ -242,11 +247,8 @@ export default function Board({ state, size, onSelect }: Props) {
       {/* Moving, token-based layer. */}
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         {tokens.map((token, pos) => {
-          const value = values[pos];
-          const note = notes[pos];
-          const v = positions.current![token];
-          const phantom = phantoms[pos];
-          const locked = phantom !== null && moves < phantom.unlockAtMove;
+          const { phantom, marker, value, notes: note } = cellContent(state, pos);
+          const v = positions.current![token]!;
           const fade = phantom ? fadeFor(phantom) : null;
           return (
             <Animated.View
@@ -260,8 +262,11 @@ export default function Board({ state, size, onSelect }: Props) {
                 },
               ]}
             >
+              {/* The faded digit and its marker sit above the cell rather than
+                  instead of it: once the lock runs out the record lingers to
+                  score the recall, and the cell is playable again meanwhile. */}
               {phantom && fade ? (
-                <>
+                <View style={styles.phantomLayer}>
                   <Animated.Text
                     style={[
                       styles.digit,
@@ -276,7 +281,7 @@ export default function Board({ state, size, onSelect }: Props) {
                   >
                     {phantom.value}
                   </Animated.Text>
-                  {settings.phantomMarkers && locked ? (
+                  {marker ? (
                     <Animated.View
                       style={[
                         styles.marker,
@@ -289,8 +294,9 @@ export default function Board({ state, size, onSelect }: Props) {
                       </Text>
                     </Animated.View>
                   ) : null}
-                </>
-              ) : value !== 0 ? (
+                </View>
+              ) : null}
+              {value !== 0 ? (
                 <Text
                   style={[
                     styles.digit,
@@ -363,6 +369,15 @@ const makeStyles = (colors: Colors) =>
   digit: {
     fontVariant: ['tabular-nums'],
   },
+  phantomLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   phantomDigit: {
     position: 'absolute',
   },
@@ -387,6 +402,8 @@ const makeStyles = (colors: Colors) =>
   },
   note: {
     textAlign: 'center',
-    color: colors.textMuted,
+    // Pencil marks are a quarter of a cell tall and sit on every highlight
+    // the board draws; the muted tone cannot reach 4.5:1 on a selected cell.
+    color: colors.text,
   },
   });

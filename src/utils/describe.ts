@@ -23,7 +23,7 @@ export function describeCell(state: GameState, pos: number): string {
   }
   const value = state.values[pos];
   if (value !== 0) return `${where}, ${value}${state.given[pos] ? ', given' : ''}`;
-  const notes = listNotes(state.notes[pos]);
+  const notes = listNotes(state.notes[pos]!);
   if (notes) return `${where}, empty, noted ${notes}`;
   return `${where}, empty`;
 }

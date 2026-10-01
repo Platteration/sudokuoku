@@ -1,23 +1,36 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import {
   Action,
   DEFAULT_SETTINGS,
   GameState,
   applyShift,
+  isLocked,
   mistakes,
   newGame,
-  nextShift,
+  nextShifts,
   reduce,
   remainingCounts,
 } from '../game';
+import { PRESETS, RULE_KEYS } from '../presets';
+import { dailyConfig, dailySeed, dailySettings } from '../progress';
 import { CELLS, isComplete } from '../sudoku';
-import { rotateShift } from '../transforms';
+import { joinDescriptions, permute, rotateShift } from '../transforms';
 
 const run = (state: GameState, ...actions: Action[]) =>
   actions.reduce(reduce, state);
 
+/** The first empty cell: a board with none fails the test here, not later. */
 function firstEmpty(state: GameState): number {
-  return state.values.findIndex((v) => v === 0);
+  const p = state.values.findIndex((v) => v === 0);
+  assert(p >= 0, 'the board has no empty cell');
+  return p;
+}
+
+/** The solution's digit at `pos`; a findIndex that found nothing (-1) fails the test. */
+function answer(state: GameState, pos: number): number {
+  const digit = state.solution[pos];
+  assert.isDefined(digit, `no cell at position ${pos}`);
+  return digit;
 }
 
 /** Every given, and every correct entry, should still match the solution. */
@@ -53,7 +66,7 @@ describe('moves and shifts', () => {
   it('the entered digit travels with its cell and the selection follows it', () => {
     const s0 = newGame(DEFAULT_SETTINGS, 2);
     const p = firstEmpty(s0);
-    const token = s0.tokens[p];
+    const token = s0.tokens[p]!;
     const s1 = run(s0, { type: 'select', pos: p }, { type: 'input', digit: 4 });
     const newPos = s1.tokens.indexOf(token);
     expect(s1.values[newPos]).toBe(4);
@@ -64,11 +77,11 @@ describe('moves and shifts', () => {
   it('a correct entry stays correct after any number of shifts', () => {
     const s0 = newGame(DEFAULT_SETTINGS, 3);
     const p = firstEmpty(s0);
-    const token = s0.tokens[p];
-    let s = run(s0, { type: 'select', pos: p }, { type: 'input', digit: s0.solution[p] });
+    const token = s0.tokens[p]!;
+    let s = run(s0, { type: 'select', pos: p }, { type: 'input', digit: answer(s0, p) });
     for (let i = 0; i < 20; i++) {
       const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
-      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: answer(s, q) });
       const where = s.tokens.indexOf(token);
       expect(s.values[where]).toBe(s.solution[where]);
       expect(mistakes(s).size).toBe(0);
@@ -100,7 +113,7 @@ describe('moves and shifts', () => {
   it('notes do not count as moves and move with their cell', () => {
     const s0 = newGame(DEFAULT_SETTINGS, 6);
     const p = firstEmpty(s0);
-    const token = s0.tokens[p];
+    const token = s0.tokens[p]!;
     const s1 = run(
       s0,
       { type: 'select', pos: p },
@@ -155,7 +168,7 @@ describe('hint and win', () => {
   it('hint fills the solution digit for the selected cell', () => {
     const s0 = newGame(DEFAULT_SETTINGS, 9);
     const p = firstEmpty(s0);
-    const token = s0.tokens[p];
+    const token = s0.tokens[p]!;
     const s1 = run(s0, { type: 'select', pos: p }, { type: 'hint' });
     const where = s1.tokens.indexOf(token);
     expect(s1.values[where]).toBe(s1.solution[where]);
@@ -166,7 +179,7 @@ describe('hint and win', () => {
     let s = newGame({ ...DEFAULT_SETTINGS, difficulty: 'easy' }, 10);
     while (s.status === 'playing') {
       const q = s.values.findIndex((v) => v === 0);
-      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: answer(s, q) });
     }
     expect(s.status).toBe('won');
     expect(s.values).toEqual(s.solution);
@@ -188,39 +201,113 @@ describe('shift preview', () => {
   it('predicts exactly the shift the next move will apply', () => {
     let s = newGame(DEFAULT_SETTINGS, 31);
     for (let i = 0; i < 12; i++) {
-      const predicted = nextShift(s);
+      const predicted = nextShifts(s);
+      expect(predicted).toHaveLength(1);
       const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
-      const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: s.solution[q] });
-      expect(after.lastShift!.kind).toBe(predicted!.kind);
-      expect(after.lastShift!.description).toBe(predicted!.description);
-      expect(after.lastShift!.dest).toEqual(predicted!.dest);
+      const shift = predicted[0]!;
+      const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: answer(s, q) });
+      expect(after.lastShift!.kind).toBe(shift.kind);
+      expect(after.lastShift!.description).toBe(shift.description);
+      expect(after.lastShift!.dest).toEqual(shift.dest);
       s = after;
     }
   });
 
-  it('is null when the next move does not trigger a shift', () => {
+  it('predicts every shift of a move that fires several', () => {
+    let s = newGame({ ...DEFAULT_SETTINGS, shiftsPerMove: 3 }, 35);
+    for (let i = 0; i < 8; i++) {
+      const predicted = nextShifts(s);
+      expect(predicted).toHaveLength(3);
+      const before = s.shiftCount;
+      const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
+      const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: answer(s, q) });
+      // All three fired, in the order predicted: permuting the cells by hand
+      // with the predicted shifts lands the board exactly where the move did.
+      expect(after.shiftCount).toBe(before + 3);
+      expect(after.tokens).toEqual(predicted.reduce((t, shift) => permute(t, shift), s.tokens));
+      s = after;
+    }
+  });
+
+  it('describes the whole move, not just its last shift', () => {
+    const s = newGame({ ...DEFAULT_SETTINGS, shiftsPerMove: 2 }, 36);
+    const predicted = nextShifts(s);
+    expect(predicted).toHaveLength(2);
+    const q = s.values.findIndex((v, idx) => v === 0 && !s.given[idx]);
+    const after = run(s, { type: 'select', pos: q }, { type: 'input', digit: answer(s, q) });
+    // The banner and the screen reader read this one string.
+    const said = after.lastShift!.description;
+    expect(said).toContain(predicted[0]!.description);
+    expect(said.toLowerCase()).toContain(predicted[1]!.description.toLowerCase());
+    expect(said).toBe(joinDescriptions(predicted.map((p) => p.description)));
+  });
+
+  it('is empty when the next move does not trigger a shift', () => {
     const s = newGame({ ...DEFAULT_SETTINGS, shiftEvery: 3 }, 32);
-    expect(nextShift(s)).toBeNull(); // move 1 of 3
+    expect(nextShifts(s)).toEqual([]); // move 1 of 3
     const p = s.values.findIndex((v) => v === 0);
     const s1 = run(s, { type: 'select', pos: p }, { type: 'input', digit: 1 });
-    expect(nextShift(s1)).toBeNull(); // move 2 of 3
+    expect(nextShifts(s1)).toEqual([]); // move 2 of 3
     const q = s1.values.findIndex((v) => v === 0);
     const s2 = run(s1, { type: 'select', pos: q }, { type: 'input', digit: 1 });
-    expect(nextShift(s2)).not.toBeNull(); // move 3 triggers
+    expect(nextShifts(s2)).toHaveLength(1); // move 3 triggers
     expect(s2.shiftCount).toBe(0);
   });
 
-  it('is null with no shifts enabled or once the game is over', () => {
-    expect(nextShift(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 33))).toBeNull();
+  it('is empty with no shifts enabled or once the game is over', () => {
+    expect(nextShifts(newGame({ ...DEFAULT_SETTINGS, enabledShifts: [] }, 33))).toEqual([]);
     const won = { ...newGame(DEFAULT_SETTINGS, 33), status: 'won' as const };
-    expect(nextShift(won)).toBeNull();
+    expect(nextShifts(won)).toEqual([]);
   });
 
   it('does not change when the player only takes notes', () => {
     const s = newGame(DEFAULT_SETTINGS, 34);
-    const before = nextShift(s);
+    const before = nextShifts(s);
     const p = s.values.findIndex((v) => v === 0);
     const noted = run(s, { type: 'select', pos: p }, { type: 'toggleNotesMode' }, { type: 'input', digit: 5 });
-    expect(nextShift(noted)!.description).toBe(before!.description);
+    const after = nextShifts(noted);
+    expect(before).toHaveLength(1);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.description).toBe(before[0]!.description);
+  });
+});
+
+describe('updateSettings', () => {
+  const zen = PRESETS.find((p) => p.id === 'zen')!;
+  const dailyKey = '2026-09-09'; // a Wednesday: medium, phantom day
+  const startDaily = (): GameState =>
+    newGame(dailySettings(DEFAULT_SETTINGS, dailyConfig(dailyKey)), dailySeed(dailyKey), {
+      mode: 'daily',
+      dailyKey,
+    });
+
+  it('applies a preset in free play', () => {
+    const s = newGame({ ...DEFAULT_SETTINGS, phantomMode: true }, 40);
+    const after = reduce(s, { type: 'updateSettings', settings: zen.rules });
+    expect(after.settings.enabledShifts).toEqual([]);
+    expect(after.settings.phantomMode).toBe(false);
+  });
+
+  it('ignores rule changes during a daily but keeps appearance and assistance', () => {
+    const s = startDaily();
+    const after = reduce(s, {
+      type: 'updateSettings',
+      settings: { ...zen.rules, theme: 'dark', highlightConflicts: false, shiftPreview: 'exact' },
+    });
+    for (const key of RULE_KEYS) expect(after.settings[key]).toEqual(s.settings[key]);
+    expect(after.settings.theme).toBe('dark');
+    expect(after.settings.highlightConflicts).toBe(false);
+    expect(after.settings.shiftPreview).toBe('exact');
+  });
+
+  it('keeps the daily shifting and fading after a preset tap', () => {
+    let s = reduce(startDaily(), { type: 'updateSettings', settings: zen.rules });
+    expect(s.settings.phantomMode).toBe(true);
+    for (let i = 0; i < 6; i++) {
+      const q = s.values.findIndex((v, idx) => v === 0 && !isLocked(s, idx));
+      s = run(s, { type: 'select', pos: q }, { type: 'input', digit: answer(s, q) });
+    }
+    expect(s.shiftCount).toBeGreaterThan(0);
+    expect(s.phantomCount).toBeGreaterThan(0);
   });
 });
