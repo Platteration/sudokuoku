@@ -58,8 +58,14 @@ export function headersFor(rules, path) {
 }
 
 /**
- * The policy for a page's <meta>: what `_headers` sends every response, less `frame-ancestors`,
- * which a <meta> cannot carry (browsers ignore it there and say so in the console).
+ * The policy for a page's <meta>: what `_headers` sends every response, less two directives.
+ * `frame-ancestors`, which a <meta> cannot carry (browsers ignore it there and say so in the
+ * console). And `upgrade-insecure-requests`, which a <meta> can carry but should not: every
+ * address the pages load is the site's own, so on https it changes nothing, and on a plain-http
+ * page that is not localhost (a LAN preview of dist/, a host before its certificate) it sent
+ * guard.js and the bundle to https on a port that speaks http: both failed, and the visitor got
+ * a blank page with no note, the safety net having been the first thing refused. Every host
+ * config that sends the header also redirects http to https, so the header copies keep it.
  */
 export function metaPolicy(headersText) {
   const every = parseHeaders(headersText).filter((rule) => rule.path === '/*');
@@ -68,6 +74,6 @@ export function metaPolicy(headersText) {
   return policy
     .split(';')
     .map((d) => d.trim())
-    .filter((d) => d && !d.startsWith('frame-ancestors'))
+    .filter((d) => d && !/^(frame-ancestors|upgrade-insecure-requests)\b/.test(d))
     .join('; ');
 }

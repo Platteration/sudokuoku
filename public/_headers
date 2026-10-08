@@ -6,20 +6,28 @@
 # <meta> cannot carry.
 #
 # Every value was measured in Chromium with this policy sent as a header (npm run test:e2e).
-# style-src carries 'unsafe-inline' because the framework writes <style> elements while it
-# runs: react-native-web's stylesheet, expo-font's @font-face for the icon font, and the reset
-# in index.html. Without it the board draws unstyled and every icon is blank. Nothing else is
-# inline: no script, no event handler, no eval, and Trusted Types refuse any HTML from a string.
-# connect-src is 'none' because the app has no network code. clipboard-read and clipboard-write
-# are the challenge sheet's Copy and Paste; web-share (the result card) is left at its default,
-# this origin, because Chromium on Linux does not know the name and says so in the console.
+# style-src carries 'unsafe-inline' for expo-font, which writes the icon font's @font-face into a
+# <style> as text while the app starts. That text holds the font's address, base path and content
+# hash included, so a hash of it changes with each deployment path and each icon font, and the
+# copies of this policy written by hand (deploy/nginx.conf, the README) could not follow it;
+# without the font face every icon is blank. The other two <style> elements would not need it:
+# react-native-web's stylesheet is empty and filled through insertRule, which the hash of the
+# empty string covers, and index.html's reset is fixed text a file could carry. The suite serves
+# the page with the empty-string hash in place of 'unsafe-inline' and checks that those two texts
+# are all it refuses. Nothing else is inline: no script, no event handler, no eval, and Trusted
+# Types refuse any HTML from a string.
+# connect-src is 'none' because the app has no network code. Permissions-Policy turns off every
+# feature the suite's Chromium knows, client hints aside, but clipboard-read and clipboard-write,
+# the challenge sheet's Copy and Paste (the suite reads the allowed list back off the page).
+# web-share (the result card) is left at its default, this origin, because Chromium on Linux
+# does not know the name and says so in the console.
 
 /*
   Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
-  Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), xr-spatial-tracking=()
+  Permissions-Policy: accelerometer=(), aria-notify=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), captured-surface-control=(), clipboard-read=(self), clipboard-write=(self), compute-pressure=(), cross-origin-isolated=(), deferred-fetch=(), deferred-fetch-minimal=(), digital-credentials-get=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), interest-cohort=(), join-ad-interest-group=(), keyboard-map=(), language-detector=(), local-fonts=(), local-network-access=(), magnetometer=(), microphone=(), midi=(), on-device-speech-recognition=(), otp-credentials=(), payment=(), picture-in-picture=(), private-aggregation=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), storage-access=(), summarizer=(), sync-xhr=(), translator=(), unload=(), usb=(), window-management=(), xr-spatial-tracking=()
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
   Strict-Transport-Security: max-age=31536000; includeSubDomains

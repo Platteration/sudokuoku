@@ -80,6 +80,7 @@ import { confirmAction, notify } from '../confirm';
 import { haptic, setHapticsEnabled } from '../haptics';
 import { useReduceMotion } from '../motion';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
+import { CHALLENGE_LINK, withoutChallengeLink } from '../utils/challengeInput';
 import { describeShift } from '../utils/describe';
 import { applyShared, pickShared } from '../utils/saved';
 import { formatTime } from '../utils/time';
@@ -329,6 +330,22 @@ function GameView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phantomCount]);
 
+  /**
+   * On the web, the challenge the page's address named when it loaded, as its code. The browser
+   * keeps a followed link in the address bar and a reload reads it again, which is how a reload
+   * carries on with that challenge. Once it is won, or another challenge takes the slot, the
+   * link is taken out of the address: left there, the next reload started the challenge just
+   * won over again and counted another game played.
+   */
+  const addressChallenge = useRef<string | null>(null);
+  const forgetAddressChallenge = useCallback(() => {
+    if (addressChallenge.current === null) return;
+    addressChallenge.current = null;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState(window.history.state, '', withoutChallengeLink(window.location.href));
+    }
+  }, []);
+
   // A win: fold it into the profile once per game.
   const wonSeed = useRef<number | null>(initial.free.status === 'won' ? initial.free.seed : null);
   useEffect(() => {
@@ -340,7 +357,10 @@ function GameView({
     setOutcome(result);
     setShowWin(true);
     if (state.mode === 'daily') clearDailyGame();
-    if (state.mode === 'challenge') clearChallengeGame();
+    if (state.mode === 'challenge') {
+      clearChallengeGame();
+      forgetAddressChallenge();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status, state.seed]);
 
@@ -419,12 +439,14 @@ function GameView({
       park(state);
       const settings = { ...state.settings, ...pickShared(state.settings) };
       const next = startChallenge(settings, challenge);
+      const code = encodeChallenge(challenge);
       setChallengeInfo(challenge);
-      saveChallengeCode(encodeChallenge(challenge));
+      saveChallengeCode(code);
+      if (code !== addressChallenge.current) forgetAddressChallenge();
       updateProfile(recordGameStart(profile, next.settings.difficulty));
       show(next);
     },
-    [state, profile, park, show, updateProfile, setChallengeInfo],
+    [state, profile, park, show, updateProfile, setChallengeInfo, forgetAddressChallenge],
   );
 
   /**
@@ -510,7 +532,7 @@ function GameView({
   offerChallengeRef.current = offerChallenge;
 
   const getChallengeCode = (url: string): string | null => {
-    const match = /\/c\/([^/?#]+)/.exec(url);
+    const match = CHALLENGE_LINK.exec(url);
     if (!match) return null;
     const rawCode = match[1];
     if (!rawCode || rawCode.length > MAX_CODE_LENGTH) return null;
@@ -531,6 +553,7 @@ function GameView({
       if (!code) return;
       const result = decodeChallenge(code);
       if (result.ok) {
+        if (Platform.OS === 'web') addressChallenge.current = encodeChallenge(result.challenge);
         offerChallengeRef.current(result.challenge);
       } else {
         notify('That challenge could not be opened', result.error);

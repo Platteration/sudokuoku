@@ -3,9 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <!-- npm run build:web adds the Content-Security-Policy <meta> here, from _headers (less
-         frame-ancestors, which a <meta> cannot carry), for a host that sends no headers. It is not
-         in this template because `npm run web` serves the template too, and the dev server's
-         reloading needs a socket and its error overlay HTML from strings, which the policy refuses. -->
+         frame-ancestors, which a <meta> cannot carry, and upgrade-insecure-requests, which on a
+         plain-http address sent this page's own scripts to https), for a host that sends no
+         headers. It is not in this template because `npm run web` serves the template too, and the
+         dev server's reloading needs a socket and its error overlay HTML from strings, which the
+         policy refuses. -->
     <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <meta name="description" content="Sudoku that shifts under you after every move, and stays solvable." />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseChallengeInput } from '../challengeInput';
+import { CHALLENGE_LINK, parseChallengeInput, withoutChallengeLink } from '../challengeInput';
 
 /** The parser as it was written with a pattern, kept as the reference for what it answers. */
 function reference(raw: string): string {
@@ -64,6 +64,30 @@ describe('reading a pasted challenge', () => {
       const start = performance.now();
       parseChallengeInput(text);
       expect(performance.now() - start, JSON.stringify(text.slice(0, 12))).toBeLessThan(250);
+    }
+  });
+});
+
+describe('the website address once its challenge is done with', () => {
+  const CODE = 'AQH_6putX8SjK4Ch';
+
+  it('is the page the link was followed to, naming no challenge', () => {
+    const cases: [string, string][] = [
+      [`https://example.org/sudokuoku/?/c/${CODE}`, 'https://example.org/sudokuoku/'],
+      [`https://example.org/sudokuoku/#/c/${CODE}`, 'https://example.org/sudokuoku/'],
+      [`http://127.0.0.1:8081/?/c/${CODE}#top`, 'http://127.0.0.1:8081/#top'],
+      [`http://localhost:8081/c/${CODE}`, 'http://localhost:8081/'],
+      [`https://example.org/apps/sudokuoku/c/${CODE}?x=1`, 'https://example.org/apps/sudokuoku/?x=1'],
+    ];
+    for (const [href, page] of cases) {
+      expect(withoutChallengeLink(href), href).toBe(page);
+      expect(CHALLENGE_LINK.test(withoutChallengeLink(href)), href).toBe(false);
+    }
+  });
+
+  it('is left as it is when it names none', () => {
+    for (const href of ['https://example.org/sudokuoku/', 'https://example.org/sudokuoku/?code=1#c', 'https://example.org/c']) {
+      expect(withoutChallengeLink(href)).toBe(href);
     }
   });
 });

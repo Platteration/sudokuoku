@@ -45,3 +45,27 @@ function withoutQuery(text: string): string {
   }
   return text;
 }
+
+/**
+ * Where a link names a challenge: `/c/<code>`, the first one anywhere in it. The app's own link is
+ * `sudokuoku://c/<code>`; the website reads the same out of its address, where a static host can
+ * only answer for the one page, so the code rides in the query or the fragment
+ * (`…/sudokuoku/?/c/<code>`, `…/sudokuoku/#/c/<code>`).
+ */
+export const CHALLENGE_LINK = /\/c\/([^/?#]+)/;
+
+/**
+ * The website's address without the challenge link in it: the path cut before `/c/` when the
+ * link is there, and the query or the fragment dropped when it holds one. A browser keeps a
+ * followed link in the address bar and a reload reads it again, which is how a reload carries on
+ * with the challenge it names; once that challenge is won, or another has taken the slot, the
+ * game puts this address in its place, so a reload does not start it over.
+ */
+export function withoutChallengeLink(href: string): string {
+  const url = new URL(href);
+  const at = url.pathname.search(CHALLENGE_LINK);
+  if (at >= 0) url.pathname = url.pathname.slice(0, at + 1);
+  if (CHALLENGE_LINK.test(url.search)) url.search = '';
+  if (CHALLENGE_LINK.test(url.hash)) url.hash = '';
+  return url.href;
+}

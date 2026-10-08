@@ -7,12 +7,14 @@
  * the site, and for the cache rules. `npm run test:e2e` is where the policy is measured against
  * the running app; this is where the copies are held to each other.
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { withBase, withPolicy } from '../../scripts/build-web.mjs';
+import { OUT_FOLDERS, withBase, withPolicy } from '../../scripts/build-web.mjs';
 import { headersFor, metaPolicy, parseHeaders } from '../../scripts/headers.mjs';
 import { SOURCE_URL } from '../about';
 import { darkColors, lightColors } from '../palette';
@@ -45,9 +47,143 @@ function fromHtaccess(): Record<string, string> {
   return Object.fromEntries([...text.matchAll(/^\s*Header always set ([\w-]+) "([^"]*)"\s*$/gm)].map((m) => [m[1]!, m[2]!]));
 }
 
-/** nginx's `add_header Name "value" always;` lines with a literal value. */
+/** A directive of nginx's configuration: its name, its arguments, and the block it opens, if any. */
+interface NginxDirective {
+  name: string;
+  args: string[];
+  block?: NginxDirective[];
+}
+
+/**
+ * nginx's configuration as nginx reads it: words and quoted strings (where a backslash before a
+ * quote or a backslash keeps that character, and any other backslash stays), `#` comments, and
+ * `;` and braces ending a directive or opening and closing a block. Read line by line, a header
+ * in a location looks like one at server level, and nginx treats them very differently: a
+ * location that adds any header of its own inherits none of the server's.
+ */
+function parseNginx(text: string): NginxDirective[] {
+  const tokens: { text: string; punct: boolean }[] = [];
+  for (let i = 0; i < text.length; ) {
+    const c = text[i]!;
+    if (/\s/.test(c)) i += 1;
+    else if (c === '#') while (i < text.length && text[i] !== '\n') i += 1;
+    else if (c === ';' || c === '{' || c === '}') {
+      tokens.push({ text: c, punct: true });
+      i += 1;
+    } else if (c === '"' || c === "'") {
+      let word = '';
+      for (i += 1; i < text.length && text[i] !== c; i += 1) {
+        if (text[i] === '\\' && (text[i + 1] === c || text[i + 1] === '\\')) i += 1;
+        word += text[i];
+      }
+      expect(i < text.length, 'every quoted string is closed').toBe(true);
+      tokens.push({ text: word, punct: false });
+      i += 1;
+    } else {
+      let word = '';
+      while (i < text.length && !/[\s;{}]/.test(text[i]!)) word += text[i++];
+      tokens.push({ text: word, punct: false });
+    }
+  }
+  let at = 0;
+  const block = (depth: number): NginxDirective[] => {
+    const out: NginxDirective[] = [];
+    let words: string[] = [];
+    while (at < tokens.length) {
+      const token = tokens[at++]!; // the loop condition bounds it
+      if (!token.punct) {
+        words.push(token.text);
+        continue;
+      }
+      if (token.text === '}') {
+        expect(words, 'a directive before a closing brace ends with ;').toEqual([]);
+        expect(depth, 'a closing brace closes a block').toBeGreaterThan(0);
+        return out;
+      }
+      const [name, ...args] = words;
+      expect(name, `a ${token.text} follows a directive`).toBeDefined();
+      words = [];
+      out.push(token.text === '{' ? { name: name!, args, block: block(depth + 1) } : { name: name!, args });
+    }
+    expect(words, 'the last directive ends with ;').toEqual([]);
+    expect(depth, 'every block is closed').toBe(0);
+    return out;
+  };
+  return block(0);
+}
+
+const nginxConf = () => parseNginx(read('deploy/nginx.conf'));
+
+/** The server that answers https, the only one that serves the site: the one listening with ssl. */
+function tlsServer(conf: NginxDirective[]): NginxDirective[] {
+  const servers = conf.filter((d) => d.name === 'server' && d.block?.some((l) => l.name === 'listen' && l.args.includes('ssl')));
+  expect(servers).toHaveLength(1);
+  return servers[0]!.block!; // the length was just checked, and a server is a block
+}
+
+/** Every directive in `directives` and in the blocks below them, each with the block it sits in. */
+function everyDirective(directives: NginxDirective[]): { directive: NginxDirective; parent: NginxDirective[] }[] {
+  return directives.flatMap((directive) => [{ directive, parent: directives }, ...(directive.block ? everyDirective(directive.block) : [])]);
+}
+
+/** nginx's headers with a literal value: the https server's own `add_header`s. */
 function fromNginx(): Record<string, string> {
-  return Object.fromEntries([...read('deploy/nginx.conf').matchAll(/^\s*add_header ([\w-]+) "([^"]*)" always;$/gm)].map((m) => [m[1]!, m[2]!]));
+  const headers = tlsServer(nginxConf()).filter((d) => d.name === 'add_header' && !d.args[1]!.startsWith('$'));
+  return Object.fromEntries(headers.map((d) => [d.args[0]!, d.args[1]!]));
+}
+
+/**
+ * What nginx answers an address with, by its locations: an exact location first, then the first
+ * regular expression that matches in file order, then the longest prefix. `served` means the file
+ * is sent if it exists; a number is the status a location returns (`internal` is a 404 from outside).
+ */
+function nginxAnswer(server: NginxDirective[], uri: string): 'served' | number {
+  const locations = server.filter((d) => d.name === 'location');
+  const exact = locations.find((l) => l.args[0] === '=' && l.args[1] === uri);
+  const regex = locations.find((l) => l.args[0] === '~' && new RegExp(l.args[1]!).test(uri));
+  const prefix = locations.filter((l) => l.args.length === 1 && uri.startsWith(l.args[0]!)).sort((a, b) => b.args[0]!.length - a.args[0]!.length)[0];
+  const chosen = exact ?? regex ?? prefix;
+  if (!chosen) return 404;
+  if (chosen.block!.some((d) => d.name === 'internal')) return 404;
+  const returned = chosen.block!.find((d) => d.name === 'return');
+  return returned ? Number(returned.args[0]) : 'served';
+}
+
+/**
+ * What Apache answers an address with, by .htaccess's rewrite rules in order: a rule fires when
+ * its pattern matches the address without its leading slash (or, after `!`, does not) and every
+ * condition just before it holds. `served` means no rule fired. Only the conditions the file
+ * uses are known here, so a new kind of condition fails the test rather than being guessed at.
+ */
+function apacheAnswer(conf: string, uri: string, https = true): 'served' | number {
+  const vars = new Map([
+    ['%{HTTPS}', https ? 'on' : 'off'],
+    ['%{HTTP:X-Forwarded-Proto}', ''],
+  ]);
+  let conditions: boolean[] = [];
+  for (const line of conf.split('\n').map((l) => l.trim())) {
+    if (line.startsWith('RewriteCond ')) {
+      const cond = /^RewriteCond (\S+) (!?=)(\S+)$/.exec(line);
+      expect(cond && vars.has(cond[1]!), `a condition this test can read: ${line}`).toBe(true);
+      const value = vars.get(cond![1]!); // the line was just checked
+      conditions.push(cond![2] === '=' ? value === cond![3] : value !== cond![3]);
+    } else if (line.startsWith('RewriteRule ')) {
+      const rule = /^RewriteRule (!?)(\S+) \S+ \[(?:[^\]]*,)?R=(\d+)(?:,[^\]]*)?\]$/.exec(line);
+      expect(rule, `a rule this test can read: ${line}`).not.toBeNull();
+      const [, negated, pattern, status] = rule!; // the line was just checked
+      const holds = conditions.every(Boolean);
+      conditions = [];
+      if (holds && new RegExp(pattern!).test(uri.slice(1)) !== (negated === '!')) return Number(status);
+    }
+  }
+  return 'served';
+}
+
+/** Every file the repository tracks, at the address a server pointed at a checkout would give it. */
+function tracked(): string[] {
+  const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+  expect(files.length, 'git lists the repository').toBeGreaterThan(50);
+  return files.map((f) => `/${f}`);
 }
 
 /** The README's copy: the `Name: value` lines of its fenced block of response headers. */
@@ -90,10 +226,14 @@ describe('the policy', () => {
     expect(fromReadme()).toEqual(header);
   });
 
-  it('is what the build writes into both pages, less frame-ancestors, which a <meta> cannot carry', () => {
+  it('is what the build writes into both pages, less frame-ancestors and upgrade-insecure-requests', () => {
     const csp = directives(header['Content-Security-Policy']!);
     const policy = metaPolicy(read('public/_headers'));
-    expect([...directives(policy)]).toEqual([...csp].filter(([name]) => name !== 'frame-ancestors'));
+    // frame-ancestors, which a <meta> cannot carry; upgrade-insecure-requests, which on a plain
+    // http page that is not localhost sent the safety net and the bundle to https and left a
+    // blank page (npm run test:e2e loads the site that way).
+    expect([...directives(policy)]).toEqual([...csp].filter(([name]) => name !== 'frame-ancestors' && name !== 'upgrade-insecure-requests'));
+    expect(csp.has('upgrade-insecure-requests')).toBe(true); // the headers keep it
     for (const page of PAGES) {
       // None in the template: `npm run web` serves it too, and the dev server's reloading needs
       // what the policy refuses.
@@ -203,9 +343,10 @@ describe('the pages', () => {
 });
 
 /**
- * The sample a host is asked for: every kind of file the site has, and the files that are not
- * part of it — the hosting configs and Expo's update manifest, which are in the published folder,
- * and the repository's own files, should a checkout ever be served.
+ * The sample a host is asked for: every kind of file the site has, and what is not part of it —
+ * the hosting configs and Expo's update manifest, which are in the published folder, folders,
+ * names the site does not have, and (in the tests below) every file the repository tracks,
+ * should a checkout ever be served.
  */
 const SITE = [
   '/',
@@ -217,51 +358,86 @@ const SITE = [
   '/_expo/static/js/web/index-0123456789abcdef0123456789abcdef.js',
   '/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.0123456789abcdef0123456789abcdef.ttf',
 ];
-const NOT_SITE = ['/_headers', '/_redirects', '/.htaccess', '/metadata.json', '/README.md', '/.git/config', '/.git/HEAD', '/deploy/nginx.conf', '/.env'];
+/** What a webroot ACME client writes for the certificate authority to read. */
+const CERTIFICATE_CHECK = '/.well-known/acme-challenge/0123abcDEF_-xyz';
+const NOT_SITE = [
+  '/_headers',
+  '/_redirects',
+  '/.htaccess',
+  '/metadata.json',
+  '/README.md',
+  '/.git/config',
+  '/.git/HEAD',
+  '/deploy/nginx.conf',
+  '/.env',
+  '/_expo/',
+  '/_expo/static/js/web/',
+  '/assets/',
+  '/.well-known/',
+  '/.well-known/other.txt',
+  '/_expo/static/js/web/index.js',
+  '/assets/icon.png',
+];
 
 describe('what the hosts refuse', () => {
-  it('nginx: the hosting files and the repository answer 404, the site does not', () => {
-    const conf = read('deploy/nginx.conf');
-    const refusals = [...conf.matchAll(/^\s*location ~ (\S+) \{ return 404; \}$/gm)].map((m) => new RegExp(m[1]!));
-    expect(refusals.length).toBeGreaterThanOrEqual(2);
-    const refused = (p: string) => refusals.some((r) => r.test(p));
-    expect(NOT_SITE.filter((p) => !refused(p))).toEqual([]);
-    expect(SITE.filter(refused)).toEqual([]);
-    // the 404 page is the error page, not a page of its own, and folders list nothing
-    expect(conf).toMatch(/^\s*error_page 404 \/404\.html;$/m);
-    expect(conf).toMatch(/^\s*error_page 403 =404 \/404\.html;$/m);
-    expect(conf).toMatch(/^\s*location = \/404\.html \{ internal; \}$/m);
-    expect(conf).toMatch(/^\s*autoindex off;$/m);
-    expect(conf).toMatch(/^\s*server_tokens off;$/m);
-    expect(conf).toMatch(/^\s*return 301 https:\/\/\$host\$request_uri;$/m);
+  it('nginx: the site and nothing else; the hosting files, folders and every file of a checkout answer 404', () => {
+    const text = read('deploy/nginx.conf');
+    const server = tlsServer(parseNginx(text));
+    // the forms nginxAnswer knows: an exact location, a regular expression, a plain prefix, none nested
+    const locations = server.filter((d) => d.name === 'location');
+    expect(locations.filter((l) => !((l.args.length === 2 && ['=', '~'].includes(l.args[0]!)) || (l.args.length === 1 && l.args[0]!.startsWith('/'))))).toEqual([]);
+    expect(locations.filter((l) => everyDirective(l.block!).some(({ directive }) => directive.name === 'location'))).toEqual([]);
+    const answer = (p: string) => nginxAnswer(server, p);
+    expect([...SITE, CERTIFICATE_CHECK].filter((p) => answer(p) !== 'served')).toEqual([]);
+    expect([...NOT_SITE, ...tracked()].filter((p) => answer(p) !== 404)).toEqual([]);
+    expect(answer('/404.html'), 'the 404 page is the error page, not a page of its own').toBe(404);
+    // folders list nothing, a 403 shows the 404 page, and plain http is sent to https
+    expect(text).toMatch(/^\s*error_page 404 \/404\.html;$/m);
+    expect(text).toMatch(/^\s*error_page 403 =404 \/404\.html;$/m);
+    expect(text).toMatch(/^\s*autoindex off;$/m);
+    expect(text).toMatch(/^\s*server_tokens off;$/m);
+    expect(text).toMatch(/^\s*return 301 https:\/\/\$host\$request_uri;$/m);
   });
 
-  it('Apache: the same paths, by the same rules', () => {
+  it('nginx: every header is the https server’s own, sent always, and no location adds one', () => {
+    // nginx gives a location the server's add_headers only when it has none of its own: one Vary
+    // in a location served its files with no policy, nosniff, HSTS or Cache-Control.
+    const conf = nginxConf();
+    const server = tlsServer(conf);
+    const elsewhere = everyDirective(conf).filter(({ directive, parent }) => directive.name === 'add_header' && parent !== server);
+    expect(elsewhere.map(({ directive }) => directive.args.join(' '))).toEqual([]);
+    const headers = server.filter((d) => d.name === 'add_header');
+    expect(headers.map((d) => d.args[0])).toEqual([...SECURITY_HEADERS, 'Cache-Control']);
+    expect(headers.filter((d) => d.args.length !== 3 || d.args[2] !== 'always').map((d) => d.args[0])).toEqual([]); // a 404 carries them too
+  });
+
+  it('nginx: says beside `http2 on;` that it needs nginx 1.25.1, and what to write on an older one', () => {
+    // Debian 12 ships nginx 1.22 and Ubuntu 24.04 1.24, where the directive stops the server reloading.
+    const text = read('deploy/nginx.conf');
+    expect(text).toMatch(/#[^\n]*nginx 1\.25\.1[^\n]*\n\s*http2 on;/);
+    expect(text).toMatch(/^# .*`listen 443 ssl http2;`/m);
+    expect(read('README.md')).toMatch(/nginx 1\.25\.1/);
+  });
+
+  it('Apache: the same addresses, by the same rules', () => {
     const conf = read('public/.htaccess');
-    // A rule with no RewriteCond before it holds for every request; the folder rule is the
-    // one with a condition, and it is checked separately below.
-    const lines = conf.split('\n').map((l) => l.trim());
-    const refusals = lines
-      .map((line, i) => ({ line, cond: (lines[i - 1] ?? '').startsWith('RewriteCond') }))
-      .filter(({ line, cond }) => !cond && /^RewriteRule \S+ - \[R=404,L\]$/.test(line))
-      .map(({ line }) => new RegExp(line.split(' ')[1]!));
-    expect(refusals.length).toBeGreaterThanOrEqual(2);
-    // Apache matches a per-directory rule against the path without its leading slash.
-    const refused = (p: string) => refusals.some((r) => r.test(p.slice(1)));
-    expect(NOT_SITE.filter((p) => !refused(p))).toEqual([]);
-    expect([...SITE, '/404.html'].filter(refused)).toEqual([]);
-    expect(conf).toMatch(/^\s*RewriteCond %\{REQUEST_FILENAME\} -d\n\s*RewriteRule \^\.\+\$ - \[R=404,L\]$/m);
+    const answer = (p: string) => apacheAnswer(conf, p);
+    expect([...SITE, '/404.html', CERTIFICATE_CHECK].filter((p) => answer(p) !== 'served')).toEqual([]);
+    expect([...NOT_SITE, ...tracked()].filter((p) => answer(p) !== 404)).toEqual([]);
+    // over plain http, everything is sent to https first
+    expect([...SITE, ...NOT_SITE].filter((p) => apacheAnswer(conf, p, false) !== 301)).toEqual([]);
     expect(conf).toMatch(/^Options -Indexes$/m);
     expect(conf).toMatch(/^ErrorDocument 404 \/404\.html$/m);
     expect(conf).toMatch(/^ErrorDocument 403 \/404\.html$/m);
   });
 
-  it('Netlify: the files the build publishes that are not the site', () => {
+  it('Netlify: the files the build publishes that are not the site, even though they exist', () => {
     const rules = read('public/_redirects')
       .split('\n')
       .filter((l) => l.trim() && !l.startsWith('#'))
       .map((l) => l.trim().split(/\s+/));
-    expect(rules.every((r) => r.length === 3 && r[1] === '/404.html' && r[2] === '404')).toBe(true);
+    // `404!`: Netlify does not apply a plain rule where a file exists at the path
+    expect(rules.every((r) => r.length === 3 && r[1] === '/404.html' && r[2] === '404!')).toBe(true);
     expect(rules.map((r) => r[0])).toEqual(['/_headers', '/_redirects', '/.htaccess', '/metadata.json']);
   });
 });
@@ -272,8 +448,14 @@ describe('caching', () => {
 
   it('is a year for names that carry their content hash, and a revalidation for the rest, on every host', () => {
     const rules = parseHeaders(read('public/_headers'));
-    const map = [...read('deploy/nginx.conf').matchAll(/^\s+(default|~\S+)\s+"([^"]+)";$/gm)].map((m) => [m[1]!, m[2]!] as const);
-    const nginx = (p: string) => map.find(([k]) => k !== 'default' && new RegExp(k.slice(1)).test(p))?.[1] ?? map.find(([k]) => k === 'default')?.[1];
+    // nginx sends what the https server's Cache-Control header names: the map of that variable.
+    const conf = nginxConf();
+    const variable = tlsServer(conf).find((d) => d.name === 'add_header' && d.args[0] === 'Cache-Control')?.args[1];
+    expect(variable, 'the https server sends Cache-Control, from a map').toMatch(/^\$\w+$/);
+    const maps = conf.filter((d) => d.name === 'map' && d.args[1] === variable);
+    expect(maps.map((m) => m.args[0])).toEqual(['$uri']);
+    const entries = maps[0]!.block!; // one map, just counted
+    const nginx = (p: string) => (entries.find((e) => e.name.startsWith('~') && new RegExp(e.name.slice(1)).test(p)) ?? entries.find((e) => e.name === 'default'))?.args[0];
     const apacheIf = /<If "%\{REQUEST_URI\} =~ m#(.+)#">\n\s*Header always set Cache-Control "([^"]+)"\n\s*<\/If>\n\s*<Else>\n\s*Header always set Cache-Control "([^"]+)"/.exec(read('public/.htaccess'));
     expect(apacheIf).not.toBeNull();
     const apache = (p: string) => (new RegExp(apacheIf![1]!).test(p) ? apacheIf![2] : apacheIf![3]);
@@ -308,6 +490,87 @@ describe('the security contact', () => {
   });
 });
 
+/**
+ * scripts/build-web.mjs in a sandbox of its own, with a stand-in for `expo export` that records
+ * how it was called and writes what the real one writes (public/ copied, metadata.json) but
+ * deletes nothing. The real exporter empties its output folder before it writes, so a guard that
+ * let `--out src` through, tried against the checkout itself, would take the source with it; here
+ * the worst a broken guard can do is run the stand-in.
+ */
+function sandbox() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sudokuoku-build-'));
+  const repo = path.join(dir, 'repo');
+  fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+  for (const file of ['build-web.mjs', 'headers.mjs']) fs.copyFileSync(path.join(root, 'scripts', file), path.join(repo, 'scripts', file));
+  fs.cpSync(path.join(root, 'public'), path.join(repo, 'public'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.writeFileSync(path.join(repo, 'src', 'keep.ts'), 'export {};\n');
+  fs.writeFileSync(path.join(repo, 'package.json'), '{"name":"sandbox","private":true}');
+  const expo = path.join(repo, 'node_modules', 'expo');
+  fs.mkdirSync(path.join(expo, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(expo, 'package.json'), '{"name":"expo","version":"0.0.0"}');
+  fs.writeFileSync(
+    path.join(expo, 'bin', 'cli'),
+    [
+      "const fs = require('fs');",
+      "const path = require('path');",
+      "const out = process.argv[process.argv.indexOf('--output-dir') + 1];",
+      "fs.writeFileSync(path.join(process.cwd(), 'exporter-ran.json'), JSON.stringify({ args: process.argv.slice(2), base: process.env.WEB_BASE_PATH ?? null }));",
+      "fs.cpSync(path.join(process.cwd(), 'public'), out, { recursive: true });",
+      "fs.writeFileSync(path.join(out, 'metadata.json'), '{}');",
+    ].join('\n')
+  );
+  const run = (...args: string[]) => {
+    try {
+      execFileSync(process.execPath, [path.join(repo, 'scripts', 'build-web.mjs'), ...args], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WEB_BASE_PATH: '' } });
+      return { status: 0, stderr: '' };
+    } catch (e) {
+      const error = e as { status: number; stderr: Buffer };
+      return { status: error.status, stderr: String(error.stderr) };
+    }
+  };
+  const exporter = (): { args: string[]; base: string | null } | null => {
+    const file = path.join(repo, 'exporter-ran.json');
+    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  };
+  return { dir, repo, run, exporter, remove: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+describe('the build script', () => {
+  it.each(['src', 'public', 'scripts', 'e2e', '.git', 'node_modules', '.', '..', 'dist/nested', '..cache'])('refuses --out %s before the export can empty it', (out) => {
+    const box = sandbox();
+    try {
+      const result = box.run('--out', out);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/^build-web: --out /);
+      expect(box.exporter()).toBeNull();
+      expect(fs.readFileSync(path.join(box.repo, 'src', 'keep.ts'), 'utf8')).toBe('export {};\n');
+    } finally {
+      box.remove();
+    }
+  });
+
+  it('writes to the ignored build folders, and to a folder outside the checkout', () => {
+    const ignored = read('.gitignore').split('\n').map((l) => l.trim());
+    for (const folder of OUT_FOLDERS) expect(ignored, folder).toContain(`${folder}/`);
+    const box = sandbox();
+    try {
+      for (const out of [...OUT_FOLDERS, path.join(box.dir, 'elsewhere')]) {
+        expect(box.run('--out', out), out).toEqual({ status: 0, stderr: '' });
+        const written = path.resolve(box.repo, out);
+        expect(box.exporter()?.args).toEqual(['export', '--platform', 'web', '--output-dir', written]);
+        expect(fs.existsSync(path.join(written, 'metadata.json')), out).toBe(false);
+        expect(fs.readFileSync(path.join(written, 'index.html'), 'utf8')).toContain('<meta http-equiv="Content-Security-Policy"');
+      }
+      // and to dist/ when nothing says otherwise
+      expect(box.run()).toEqual({ status: 0, stderr: '' });
+      expect(box.exporter()?.args).toEqual(['export', '--platform', 'web', '--output-dir', path.join(box.repo, 'dist')]);
+    } finally {
+      box.remove();
+    }
+  });
+});
+
 describe('app.config.js', () => {
   const appJson = JSON.parse(read('app.json')).expo;
   const configure = (base: string | undefined) => {
@@ -329,6 +592,18 @@ describe('app.config.js', () => {
   it('sets the base path a sub-path web build asks for, and nothing else', () => {
     expect(configure('/sudokuoku')).toEqual({ ...appJson, experiments: { baseUrl: '/sudokuoku' } });
     expect(configure('/apps/sudokuoku').experiments).toEqual({ baseUrl: '/apps/sudokuoku' });
+  });
+
+  it('is why `expo install` cannot add a config plugin to app.json, as AGENTS.md tells a contributor', async () => {
+    // Expo writes nothing under `plugins` while a function-style dynamic config sits beside
+    // app.json; the dry run asks without writing. When Expo learns to, or this file goes, this
+    // fails, and the sentence in AGENTS.md goes with it.
+    type ModifyConfig = (root: string, change: object, read: object, write: object) => Promise<{ type: string; message?: string }>;
+    const expo = createRequire(require.resolve('expo/package.json'));
+    const { modifyConfigAsync }: { modifyConfigAsync: ModifyConfig } = expo('@expo/config');
+    const answer = await modifyConfigAsync(root, { plugins: ['expo-camera'] }, { skipSDKVersionRequirement: true }, { dryRun: true });
+    expect(answer).toEqual({ type: 'warn', message: 'Cannot automatically write to dynamic config at: app.config.js', config: null });
+    expect(read('AGENTS.md')).toContain(`"${answer.message}"`);
   });
 
   it('refuses a base path that is not one', () => {

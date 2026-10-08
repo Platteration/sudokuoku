@@ -6,6 +6,10 @@
  *   WEB_BASE_PATH=/sudokuoku npm run build:web          # served under /sudokuoku/
  *   node scripts/build-web.mjs --out .web-build
  *
+ * `expo export` empties its output folder before it writes, so `--out` inside the checkout is
+ * dist, web-build or .web-build and nothing else (`--out src` would delete the source), and a
+ * folder outside it may be anything but one that holds the checkout.
+ *
  * `expo export` does most of it: it copies public/ (dot-folders included) into the output,
  * renders index.html from public/index.html, and, with WEB_BASE_PATH set (app.config.js turns
  * it into experiments.baseUrl), prefixes every URL it writes. The rest is this script's. It
@@ -19,7 +23,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { metaPolicy } from './headers.mjs';
@@ -31,6 +35,32 @@ export const HOSTING_FILES = ['_headers', '_redirects', '.htaccess', '404.html',
 
 /** The pages public/ supplies: they get the policy, and the base path in their site-absolute URLs. */
 const PAGES = ['index.html', '404.html'];
+
+/** The folders inside the checkout a build may be written to: .gitignore lists each one. */
+export const OUT_FOLDERS = ['dist', 'web-build', '.web-build'];
+
+/**
+ * Why the build may not write to `out`, or null when it may. `expo export` deletes its output
+ * folder before it writes, and refuses only the project folder itself and the folders above it:
+ * `--out src` emptied src/ and left public/'s files in its place. Inside the checkout the site
+ * goes to one of the ignored build folders and nowhere else; outside it, anywhere but a folder
+ * that holds the checkout.
+ */
+export function outRefusal(checkout, out) {
+  if (within(checkout, out)) {
+    const inside = relative(checkout, out);
+    return OUT_FOLDERS.includes(inside)
+      ? null
+      : `--out inside the repository is one of ${OUT_FOLDERS.join(', ')}, because the export deletes the folder first; not ${JSON.stringify(inside || '.')}`;
+  }
+  return within(out, checkout) ? `--out ${out} holds the repository, which the export would delete` : null;
+}
+
+/** Whether `path` is `folder` or inside it, by whole path segments (`..cache` is a name, not a step up). */
+function within(folder, path) {
+  const rel = relative(folder, path);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
 
 /**
  * `html` with every site-absolute `href` and `src` moved under `base` ('' for a domain root).
@@ -59,6 +89,11 @@ function main() {
   const at = args.indexOf('--out');
   const out = resolve(root, at === -1 ? 'dist' : (args[at + 1] ?? ''));
   if (at !== -1 && !args[at + 1]) throw new Error('--out needs a directory');
+  const refusal = outRefusal(root, out);
+  if (refusal) {
+    console.error(`build-web: ${refusal}`);
+    process.exit(1);
+  }
   // app.config.js validates the value; '' and '/' both mean a domain root.
   const base = (process.env.WEB_BASE_PATH ?? '').replace(/\/+$/, '');
 

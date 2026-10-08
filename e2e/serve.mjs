@@ -22,9 +22,11 @@ const TYPES = {
 
 /**
  * Serves `dir` at `base` (`/sudokuoku`) on a free port of 127.0.0.1. `outside` collects every
- * request that was not for the site. Returns the origin and a close function.
+ * request that was not for the site. `transform` rewrites the headers `_headers` gives a
+ * response before they are sent (`() => ({})` is a host that sends none, as GitHub Pages sends
+ * none of these). Returns the origin and a close function.
  */
-export async function serveSite({ dir, base }) {
+export async function serveSite({ dir, base, transform = (headers) => headers }) {
   const root = resolve(dir);
   const rules = parseHeaders(readFileSync(resolve(root, '_headers'), 'utf8'));
   const outside = [];
@@ -51,7 +53,7 @@ export async function serveSite({ dir, base }) {
     // hosting files themselves.
     const refused = /(^|\/)\.(?!well-known\/)/.test(sitePath) || /^\/(_headers|_redirects|metadata\.json)$/.test(sitePath);
     const found = inside && !refused && existsSync(file) && statSync(file).isFile();
-    const { headers } = headersFor(rules, sitePath);
+    const headers = transform(headersFor(rules, sitePath).headers);
     if (!found) {
       res.writeHead(404, { ...headers, 'Content-Type': TYPES['.html'] }).end(notFound);
       return;

@@ -1,6 +1,11 @@
-# Netlify: what the export puts in the published folder that is not part of the site.
-# (Cloudflare Pages takes no 404 rules from this file.)
-/_headers        /404.html  404
-/_redirects      /404.html  404
-/.htaccess       /404.html  404
-/metadata.json   /404.html  404
+# Netlify: what the export puts in the published folder that is not part of the site answers the
+# not-found page. `404!` rather than `404`: Netlify does not apply a plain rule to a path where a
+# file exists, and these are files that are there. Netlify has no rule that serves a list of
+# paths and refuses the rest, as the Apache and nginx configs do, so publish the folder the build
+# writes and never a checkout. Cloudflare Pages takes no 404 rules from this file, so there
+# nothing refuses .htaccess (it holds the same public headers as _headers, nothing secret), and
+# GitHub Pages serves all three hosting files.
+/_headers        /404.html  404!
+/_redirects      /404.html  404!
+/.htaccess       /404.html  404!
+/metadata.json   /404.html  404!

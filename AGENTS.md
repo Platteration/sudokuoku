@@ -156,7 +156,10 @@ dev client still reaches Metro. `allowBackup` is explicitly true because the sto
 the player's own record (three game slots — free, daily and challenge — and a profile), and a restore is untrusted JSON
 that `src/utils/saved.ts` already guards. When adding a native module, run `npm test`:
 the manifest walk fails on any permission the module declares that is neither used nor
-blocked. The one URL the app takes in is a challenge link, `sudokuoku://c/<code>`
+blocked. Add its config plugin to app.json's `plugins` by hand: with `app.config.js`
+beside app.json, Expo will not write `plugins` into a dynamic config, so `npx expo install`
+prints "Cannot automatically write to dynamic config at: app.config.js" and adds nothing
+(`website.test.ts` holds Expo to that answer, so the sentence goes when it stops being true). The one URL the app takes in is a challenge link, `sudokuoku://c/<code>`
 (`scheme` in app.json), heard by the game screen alone and read through
 `decodeChallenge`; the invite carries the bare code as well, since not every messenger
 turns a custom scheme into a link. A link is written by whoever sent it, so what one may
@@ -165,11 +168,18 @@ challenge in progress resumes, and a different one replaces a challenge with mov
 only after `confirmAction` asks. On the web the page reads a `/c/<code>` in its own
 address once, at load, and does not subscribe to `url`: expo-linking's web `url` event is
 every `message` posted to the window, from any origin, reported with the page's unchanged
-address, so subscribing let any opener, frame or extension restart a challenge.
+address, so subscribing let any opener, frame or extension restart a challenge. The link
+stays in the address while its challenge is the one in the slot, which is how a reload
+carries on with it, and `history.replaceState` takes it out (`withoutChallengeLink` in
+`src/utils/challengeInput.ts`) once that challenge is won or another takes the slot: left
+there, a reload after the win started the same board over and counted another game.
 
 ## Website
 
-The web build is a website as well as a preview: `npm run build:web` writes `dist/`, the
+The web build is a website as well as a preview: `npm run build:web` writes `dist/` (`--out`
+names another folder: inside the checkout only `dist`, `web-build` or `.web-build`, since the
+export empties the folder before it writes and `--out src` deleted the source; `website.test.ts`
+runs the script against a stand-in exporter in a temporary folder for that reason), the
 Expo web export with `public/` copied in whole (SDK 57's `copyPublicFolderAsync` is
 `fs.promises.cp`, so `public/.htaccess` and `public/.well-known/` arrive; the build fails if
 one does not). `public/index.html` is Expo's web template, of which Expo fills in only
@@ -182,22 +192,41 @@ native build sees a difference), and `scripts/build-web.mjs` prefixes the site-a
 Expo's `metadata.json`, which the page never reads. The host does the under-the-hood work: one
 policy, written in `public/_headers` (Netlify, Cloudflare Pages), `public/.htaccess` (Apache),
 `deploy/nginx.conf` (outside the published folder) and the README, and copied by the build from
-`_headers` into both pages' `<meta>` (less `frame-ancestors`). Never into the template: `npm run
-web` serves it too, and under the policy Metro's reload socket is refused and its error overlay,
-which writes HTML from strings, breaks the dev page (measured). `src/__tests__/website.test.ts`
-holds every copy equal and holds the deny and cache rules of the three hosts to one sample of
-paths. Every value is measured
+`_headers` into both pages' `<meta>`, less `frame-ancestors` (a `<meta>` cannot carry it) and
+`upgrade-insecure-requests`, which on a plain-http page that is not localhost sent `guard.js`
+and the bundle to https and left a blank page with no note (the suite loads the site that way,
+at a name mapped to 127.0.0.1, which Chromium would otherwise count as secure). Never into the
+template: `npm run web` serves it too, and under the policy Metro's reload socket is refused and
+its error overlay, which writes HTML from strings, breaks the dev page (measured).
+`src/__tests__/website.test.ts` holds every copy equal and the cache rules of the three hosts to
+one sample of paths. It reads `deploy/nginx.conf` block by block, as nginx does: every
+`add_header` is the https server's own and none is in a location, since a location that adds one
+header inherits none of the server's, and Cache-Control is checked through the header the server
+actually sends. nginx and Apache serve the site's own addresses and nothing else (an allow-list
+of the page, the 404 page, the safety net, the icon, robots.txt, security.txt, the hashed bundle
+and font, and ACME's `.well-known/acme-challenge/`), and the test walks the sample and every
+`git ls-files` path through both; Netlify can only refuse by name, so `_redirects` names the
+hosting files and `metadata.json` with `404!` (a plain rule does not apply where a file exists).
+`deploy/nginx.conf` needs nginx 1.25.1 for `http2 on;` and says what to write on an older one.
+Every value is measured
 by `npm run test:e2e`, which builds for `/sudokuoku`, serves the folder with the headers exactly
 as `_headers` writes them (`e2e/serve.mjs`) and plays the game in Chromium, failing on any
 `securitypolicyviolation`, console error, page error or request outside the site. What it
-measured: `style-src` needs `'unsafe-inline'` (react-native-web's stylesheet and expo-font's
-`@font-face` are `<style>` elements written at run time, and the font-face text holds the
-base path, so a hash would differ per deployment); nothing needs an inline script, eval, a
+measured: `style-src` needs `'unsafe-inline'` for expo-font, which writes the icon font's
+`@font-face` into a `<style>` as text holding the font's address (base path and content hash), so
+a hash would differ per deployment path and per icon font and the hand-kept copies could not
+follow it. react-native-web's stylesheet is empty and filled through `insertRule` (the
+empty-string hash covers it) and index.html's reset is fixed text; the suite serves the page with
+the empty-string hash in place of `'unsafe-inline'` and checks that those two texts are all it
+refuses. Nothing needs an inline script, eval, a
 `data:`/`blob:` source or a connection, and Trusted Types hold (`require-trusted-types-for
 'script'; trusted-types 'none'`), since React and react-native-web build the DOM with DOM
 calls. A `Permissions-Policy` feature Chromium does not know is a console warning that fails the
 suite (`web-share`, `bluetooth` and `ambient-light-sensor` are unknown to Linux Chromium), so
-only features it recognises are listed. In `_headers` a header is set by one rule per path:
+only features it recognises are listed, and every one it recognises is, off but for
+`clipboard-read` and `clipboard-write`: the suite reads `document.featurePolicy.allowedFeatures()`
+back (client hints aside) and fails on any other, so a Playwright whose Chromium knows a new
+feature fails it until the feature is turned off in all five copies. In `_headers` a header is set by one rule per path:
 Cloudflare Pages joins the values of two matching rules, so `Cache-Control` is listed by path
 rather than under `/*`. `public/guard.js` is the safety net, loaded in `<head>` before the bundle:
 it shows `#startup-failed` when the bundle fails to load, throws, or draws nothing within four

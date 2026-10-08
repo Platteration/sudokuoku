@@ -21,14 +21,14 @@ ErrorDocument 403 /404.html
   RewriteCond %{HTTPS} !=on
   RewriteCond %{HTTP:X-Forwarded-Proto} !=https
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
-  # never a dotfile (this one, a .git folder), except the security contact in .well-known
-  RewriteRule (^|/)\.(?!well-known/) - [R=404,L]
-  # the hosting configs and Expo's update manifest are not part of the site, nor are the
-  # repository's own files if a checkout is ever served by mistake
-  RewriteRule ^(_headers|_redirects|metadata\.json|README\.md|deploy(/.*)?)$ - [R=404,L]
-  # a folder with no page of its own (_expo/, assets/) is a 404, not a 403 that hints at a listing
-  RewriteCond %{REQUEST_FILENAME} -d
-  RewriteRule ^.+$ - [R=404,L]
+  # The site is these addresses and no others (the empty one is the folder itself, whose page is
+  # index.html): the page, the 404 page, the safety net, the tab icon, robots.txt, the security
+  # contact, the bundle and the icon font (each matched by the content hash in its name), and the
+  # certificate checks a webroot ACME client writes. Every other address answers 404: this file
+  # and the other hosting configs, Expo's update manifest, folders (a 404, not a 403 that hints
+  # at a listing), and every file of a checkout should one be served by mistake
+  # (src/__tests__/website.test.ts walks `git ls-files` through these rules).
+  RewriteRule !^(index\.html|404\.html|guard\.js|favicon\.ico|robots\.txt|\.well-known/security\.txt|\.well-known/acme-challenge/[A-Za-z0-9_-]+|_expo/static/js/web/[A-Za-z0-9_-]+-[0-9a-f]{32}\.js|assets/[A-Za-z0-9@/._-]+\.[0-9a-f]{32}\.[a-z0-9]+)?$ - [R=404,L]
 </IfModule>
 
 <IfModule mod_headers.c>
@@ -36,7 +36,7 @@ ErrorDocument 403 /404.html
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "DENY"
   Header always set Referrer-Policy "no-referrer"
-  Header always set Permissions-Policy "accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), xr-spatial-tracking=()"
+  Header always set Permissions-Policy "accelerometer=(), aria-notify=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), captured-surface-control=(), clipboard-read=(self), clipboard-write=(self), compute-pressure=(), cross-origin-isolated=(), deferred-fetch=(), deferred-fetch-minimal=(), digital-credentials-get=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), interest-cohort=(), join-ad-interest-group=(), keyboard-map=(), language-detector=(), local-fonts=(), local-network-access=(), magnetometer=(), microphone=(), midi=(), on-device-speech-recognition=(), otp-credentials=(), payment=(), picture-in-picture=(), private-aggregation=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), storage-access=(), summarizer=(), sync-xhr=(), translator=(), unload=(), usb=(), window-management=(), xr-spatial-tracking=()"
   Header always set Cross-Origin-Opener-Policy "same-origin"
   Header always set Cross-Origin-Resource-Policy "same-origin"
   # Browsers ignore this header on plain http, and every http request is redirected above.

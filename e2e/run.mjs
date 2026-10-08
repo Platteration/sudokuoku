@@ -7,10 +7,13 @@
  * console error, and any request outside the site, while it drives the game the way a visitor
  * does: the first-run help, a move and its shift, a reload that restores the game, the settings
  * sheet with its confirmation, a challenge copied and pasted through the clipboard, a board
- * solved to the win sheet and its result shared, and a new game confirmed. It follows challenge
- * links the way a page on another site could write them, posts the page a message, reloads, and
- * pastes text far longer than any challenge. Then it breaks the page on purpose to see the
- * safety net (public/guard.js) and the no-JavaScript note, and reads the 404 page.
+ * solved to the win sheet and its result shared, and a new game confirmed. It reads back which
+ * browser features the page is allowed. It follows challenge links the way a page on another site
+ * could write them, posts the page a message, reloads, wins a linked challenge and reloads again,
+ * and pastes text far longer than any challenge. It loads the site from a host that sends no
+ * headers, over plain http at a name that is not loopback, and measures which inline styles need
+ * style-src's 'unsafe-inline'. Then it breaks the page on purpose to see the safety net
+ * (public/guard.js) and the no-JavaScript note, and reads the 404 page.
  *
  *   npm run test:e2e
  */
@@ -76,7 +79,11 @@ const index = readFileSync(join(OUT, 'index.html'), 'utf8');
 const policyMeta = metaPolicy(readFileSync(join(OUT, '_headers'), 'utf8'));
 for (const page of ['index.html', '404.html']) {
   const metas = [...readFileSync(join(OUT, page), 'utf8').matchAll(/<meta http-equiv="Content-Security-Policy" content="([^"]*)" \/>/g)].map((m) => m[1]);
-  check(`${page} carries the policy _headers sends, as its one <meta>`, metas.length === 1 && metas[0] === policyMeta && !policyMeta.includes('frame-ancestors'), metas.join(' | '));
+  check(
+    `${page} carries the policy _headers sends, as its one <meta>, less frame-ancestors and upgrade-insecure-requests`,
+    metas.length === 1 && metas[0] === policyMeta && !policyMeta.includes('frame-ancestors') && !policyMeta.includes('upgrade-insecure-requests'),
+    metas.join(' | ')
+  );
 }
 const scripts = [...index.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1] ?? '');
 check('index.html carries no inline script: every <script> has a src', scripts.length === 2 && scripts.every((a) => /\bsrc="/.test(a)), scripts.join(' | '));
@@ -126,7 +133,12 @@ for (const line of [`${BASE}/../package.json`, `${BASE}/%2e%2e/package.json`, `$
 
 // --- the browser --------------------------------------------------------------------------
 
-const browser = await chromium.launch();
+/**
+ * A name for the test host that is not loopback. Chromium counts 127.0.0.1 as a secure context
+ * even over http; a page at this name is what a LAN preview or a host without its certificate is.
+ */
+const LAN = 'sudokuoku.test';
+const browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${LAN} 127.0.0.1`] });
 /** The page in use, photographed when the suite stops short. */
 let current = null;
 
@@ -135,7 +147,7 @@ let current = null;
  * lands in `seen`. Violations are reported through a binding, so a report made just before a
  * navigation is not lost with the page.
  */
-async function open(context, seen) {
+async function open(context, seen, at = origin) {
   await context.exposeBinding('__violation', (_source, text) => seen.violations.push(text));
   await context.addInitScript(() => {
     document.addEventListener('securitypolicyviolation', (e) => {
@@ -151,7 +163,7 @@ async function open(context, seen) {
     else if (/Content.Security.Policy|Trusted.Type|Permissions.Policy|Refused to/i.test(text)) seen.violations.push(`console: ${text.slice(0, 300)}`);
   });
   page.on('request', (r) => {
-    if (!r.url().startsWith(`${origin}${BASE}/`)) seen.outside.push(r.url());
+    if (!r.url().startsWith(`${at}${BASE}/`)) seen.outside.push(r.url());
   });
   page.on('dialog', async (d) => {
     seen.dialogs.push(`${d.type()}: ${d.message()}`);
@@ -181,10 +193,10 @@ const closeSheet = async (page, title) => {
   await heading.locator('xpath=following-sibling::*[@aria-label="Close"][1]').click();
   await heading.waitFor({ state: 'hidden', timeout: 5000 });
 };
-const report = (label, seen) => {
+const report = (label, seen, host = site) => {
   check(`${label}: no policy violation`, seen.violations.length === 0, seen.violations.join(' | '));
   check(`${label}: no uncaught error and no console error`, seen.errors.length === 0, seen.errors.join(' | '));
-  check(`${label}: no request outside the site`, seen.outside.length === 0 && site.outside.length === 0, [...seen.outside, ...site.outside].join(' | '));
+  check(`${label}: no request outside the site`, seen.outside.length === 0 && host.outside.length === 0, [...seen.outside, ...host.outside].join(' | '));
 };
 
 try {
@@ -241,6 +253,19 @@ try {
       })
   );
   check('the tab icon the page names loads under the policy', icon === `loaded ${BASE}/favicon.ico`, String(icon));
+  // Permissions-Policy turns off every feature this Chromium knows but the clipboard the challenge
+  // sheet copies to and pastes from. Client hints (ch-*) are what the browser tells a server, not
+  // something the page can use; a feature Chromium has not heard of is not listed, since naming it
+  // is a console warning (web-share, the result card's share sheet, is one on Linux).
+  const permissions = await page.evaluate(() => {
+    const policy = /** @type {{ allowedFeatures(): string[] } | undefined} */ (Reflect.get(document, 'featurePolicy'));
+    return policy ? policy.allowedFeatures().filter((f) => !f.startsWith('ch-')).sort() : null;
+  });
+  check(
+    'Permissions-Policy leaves the page the clipboard and no other feature this Chromium knows',
+    JSON.stringify(permissions) === JSON.stringify(['clipboard-read', 'clipboard-write']),
+    JSON.stringify(permissions)
+  );
   await closeSheet(page, 'How Sudokuoku works');
 
   await emptyCell(page).click();
@@ -403,6 +428,48 @@ try {
     await follow(second);
     const replaced = await kept();
     check('and accepted, the new challenge starts', (await bodyText(page)).includes('Challenge · ') && replaced?.seed !== playing?.seed && (await stat(page, 'Moves')) === 0);
+
+    // Won, the challenge leaves the address: a reload after the win neither puts the visitor back
+    // on a fresh copy of the board they finished nor counts another game played.
+    const played = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:profile:v1') ?? 'null')?.totals?.played);
+    for (let i = 0; i < 81 && (await empties.count()) > 0; i += 1) {
+      const moves = await stat(page, 'Moves');
+      await empties.first().click();
+      await button(page, 'Hint').click();
+      await until(page, async () => (await stat(page, 'Moves')) === moves + 1);
+    }
+    await page.getByText('Solved!').waitFor({ timeout: 10000 });
+    const won = await played();
+    check('a challenge from a link, won, leaves the address', page.url() === home, page.url());
+    await page.reload({ waitUntil: 'load' });
+    await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+    await settle(page, 800);
+    check(
+      'and a reload after the win neither starts it again nor counts another game',
+      !(await bodyText(page)).includes('Challenge · ') && (await kept()) === null && (await played()) === won,
+      JSON.stringify([await stat(page, 'Moves'), (await kept())?.seed ?? null, won, await played()])
+    );
+
+    // A challenge pasted over the one a link opened takes the link out of the address too, or a
+    // reload would read the link and replace the pasted challenge with it.
+    await follow(first);
+    check('a link opens its challenge again once the last one was won', (await bodyText(page)).includes('Challenge · ') && page.url() !== home);
+    await page.evaluate((text) => navigator.clipboard.writeText(text), second);
+    await button(page, 'Challenge a friend').click();
+    await button(page, 'Paste from clipboard').click();
+    await settle(page, 1000);
+    const pasted = await kept();
+    check('a pasted challenge takes the slot, and the link leaves the address', pasted?.seed === replaced?.seed && page.url() === home, `${page.url()} ${pasted?.seed}`);
+    const before = await played();
+    const dialogs = seen.dialogs.length;
+    await page.reload({ waitUntil: 'load' });
+    await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+    await settle(page, 800);
+    check(
+      'and a reload keeps the pasted challenge rather than reading the old link',
+      (await kept())?.seed === pasted?.seed && (await played()) === before && seen.dialogs.length === dialogs,
+      JSON.stringify([(await kept())?.seed, before, await played(), seen.dialogs.slice(dialogs)])
+    );
     report('challenge links', seen);
     await context.close();
   }
@@ -444,14 +511,79 @@ try {
       const longest = await page.evaluate(
         () => new Promise((done) => setTimeout(() => done(Math.round(Math.max(0, ...window.__stalls))), 200))
       );
+      const shown = await bodyText(page);
+      // What the sheet said instead, when it did not refuse: the read failed, a challenge opened, or nothing.
+      const instead = ['Could not read the clipboard.', 'Challenge · '].find((t) => shown.includes(t)) ?? 'no message';
       check(
         `a paste of ${label} is refused without holding up the page`,
-        longest < 1000 && (await bodyText(page)).includes('That challenge code is too long to open safely.'),
-        `longest stall ${longest} ms`
+        longest < 1000 && shown.includes('That challenge code is too long to open safely.'),
+        `longest stall ${longest} ms${shown.includes('That challenge code is too long to open safely.') ? '' : `; the sheet showed ${instead}, the field holds ${(await page.getByLabel('Challenge code').inputValue().catch(() => '')).length} characters`}`
       );
     }
     report('a long paste', seen);
     await context.close();
+  }
+
+  // A host that sends no headers (GitHub Pages sends none of these), over plain http, at a name
+  // that is not loopback: a LAN preview of the built folder, or a host before its certificate.
+  // The pages' <meta> is the whole policy there. With upgrade-insecure-requests in it the browser
+  // asked for guard.js and the bundle over https from a port that speaks http, both failed, and
+  // the page stayed blank without the safety net's note, the net having been refused first.
+  {
+    const bare = await serveSite({ dir: OUT, base: BASE, transform: () => ({}) });
+    const at = `http://${LAN}:${bare.port}`;
+    const seen = fresh();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await open(context, seen, at);
+    const failed = [];
+    page.on('requestfailed', (r) => failed.push(`${r.url()} ${r.failure()?.errorText ?? ''}`));
+    const answer = await page.goto(`${at}${BASE}/`, { waitUntil: 'load' });
+    check(
+      'a host with no headers, over plain http: the page is not a secure context and its <meta> is the only policy',
+      !answer?.headers()['content-security-policy'] && (await page.evaluate(() => window.isSecureContext)) === false
+    );
+    const drew = await page.getByText('How Sudokuoku works').waitFor({ timeout: 15000 }).then(
+      () => true,
+      () => false
+    );
+    check('and there the game draws, every request answered', drew && failed.length === 0, failed.join(' | '));
+    report('plain http with no headers', seen, bare);
+    await context.close();
+    await bare.close();
+  }
+
+  // Why style-src carries 'unsafe-inline'. Served with the empty-string hash in its place, the
+  // browser refuses two <style> elements and no more: index.html's reset, fixed text a file could
+  // carry, and expo-font's @font-face for the icon font, whose text holds the font's address (the
+  // base path and the font's content hash), so its hash changes with each deployment path and
+  // each icon font, and the copies of the policy written by hand (nginx.conf, the README) could
+  // not follow it. react-native-web's stylesheet is empty and filled through insertRule, which
+  // the empty-string hash covers. When this check changes, so has the reason in public/_headers.
+  {
+    const EMPTY = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='";
+    const strict = await serveSite({
+      dir: OUT,
+      base: BASE,
+      transform: (headers) => ({ ...headers, 'content-security-policy': headers['content-security-policy'].replace("'unsafe-inline'", `${EMPTY} 'report-sample'`) }),
+    });
+    const context = await browser.newContext();
+    const refused = [];
+    await context.exposeBinding('__refused', (_source, text) => refused.push(text));
+    await context.addInitScript(() => {
+      document.addEventListener('securitypolicyviolation', (e) => window.__refused(`${e.effectiveDirective}: ${e.sample}`));
+    });
+    const page = await context.newPage();
+    await page.goto(`${strict.origin}${BASE}/`, { waitUntil: 'load' });
+    await page.getByText('How Sudokuoku works').waitFor({ timeout: 15000 });
+    await settle(page, 800);
+    refused.sort();
+    check(
+      "style-src needs 'unsafe-inline' for the icon font's @font-face and the page's reset, and for nothing else",
+      refused.length === 2 && refused[0].startsWith('style-src-elem: @font-face{font-family:"ionicons"') && refused[1].startsWith('style-src-elem: html,'),
+      refused.join(' | ')
+    );
+    await context.close();
+    await strict.close();
   }
 
   // The safety net: a bundle that never arrives, one that throws as it starts, and one that

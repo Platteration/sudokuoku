@@ -42,7 +42,14 @@ Pages the build command is `npm run build:web` and the publish directory
 with it, and takes effect where the server allows it, `AllowOverride All`, and
 has `mod_rewrite` and `mod_headers`); on nginx copy it to the
 server and include `deploy/nginx.conf`, after setting its `server_name`, `root`
-and certificate paths. Never point a server at the checkout.
+and certificate paths. The nginx config needs nginx 1.25.1 or later for its
+`http2 on;` (Debian 12 and Ubuntu 24.04 ship older ones); its head says what to
+write instead on an older one. Never point a server at the checkout.
+
+`node scripts/build-web.mjs --out <folder>` writes the site somewhere else.
+The export empties that folder before it writes, so inside the checkout it is
+`dist`, `web-build` or `.web-build` and nothing else (`--out src` would delete
+the source), and outside it any folder but one that holds the checkout.
 
 The build serves from a domain's root. To serve it under a path instead (a
 GitHub Pages project site is `https://<user>.github.io/sudokuoku/`), build with
@@ -58,9 +65,13 @@ clipboard the challenge sheet copies to needs a secure context.
 
 **Response headers.** The same values are in `public/_headers`,
 `public/.htaccess` and `deploy/nginx.conf`. For a host that sends no headers,
-the build copies the policy from `_headers` into both pages as a `<meta>`
-(less `frame-ancestors`, which a `<meta>` cannot carry), and the referrer
-policy is a `<meta>` in both as well. The page template itself carries no
+the build copies the policy from `_headers` into both pages as a `<meta>`,
+less `frame-ancestors`, which a `<meta>` cannot carry, and less
+`upgrade-insecure-requests`: every address the pages load is the site's own,
+so on https it changes nothing, and on a plain-http address that is not
+localhost (a LAN preview of `dist/`, a host before its certificate) it sent the
+safety net and the bundle to https on a port that speaks http, and the page
+stayed blank. The referrer policy is a `<meta>` in both as well. The page template itself carries no
 policy, because `npm run web` serves it too, and the dev server's reloading
 needs a socket the policy refuses. `src/__tests__/website.test.ts` fails when
 any two copies differ, and `npm run test:e2e` plays the game under them in
@@ -71,7 +82,7 @@ Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: no-referrer
-Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), xr-spatial-tracking=()
+Permissions-Policy: accelerometer=(), aria-notify=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), captured-surface-control=(), clipboard-read=(self), clipboard-write=(self), compute-pressure=(), cross-origin-isolated=(), deferred-fetch=(), deferred-fetch-minimal=(), digital-credentials-get=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), interest-cohort=(), join-ad-interest-group=(), keyboard-map=(), language-detector=(), local-fonts=(), local-network-access=(), magnetometer=(), microphone=(), midi=(), on-device-speech-recognition=(), otp-credentials=(), payment=(), picture-in-picture=(), private-aggregation=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), storage-access=(), summarizer=(), sync-xhr=(), translator=(), unload=(), usb=(), window-management=(), xr-spatial-tracking=()
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Resource-Policy: same-origin
 Strict-Transport-Security: max-age=31536000; includeSubDomains
@@ -79,12 +90,23 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 Only the site's own script runs, and no script from a string: no inline
 script, no eval, and Trusted Types refuse HTML built from a string.
-`'unsafe-inline'` is in `style-src` alone, because react-native-web and
-expo-font write `<style>` elements while the app runs; without it the board
-draws unstyled and the icons are blank. `connect-src 'none'` holds the "no
+`'unsafe-inline'` is in `style-src` alone, for expo-font: it writes the icon
+font's `@font-face` into a `<style>` as text while the app starts, and that text
+holds the font's address, base path and content hash included, so a hash of it
+would change with every deployment path and icon font, and the copies of the
+policy kept by hand here and in `deploy/nginx.conf` could not follow it. The
+other two `<style>` elements would not need it: react-native-web's stylesheet
+is empty and filled through `insertRule` (the hash of the empty string covers
+it), and the page's reset is fixed text a file could carry. The end-to-end
+suite serves the page with the empty-string hash in its place and checks that
+those two are all it refuses. `connect-src 'none'` holds the "no
 network code" promise in the browser: a request the app tried to make would be
 refused and reported. `frame-ancestors 'none'` and `X-Frame-Options` keep the
-game out of other sites' frames. `no-referrer`, because a page address can
+game out of other sites' frames. `Permissions-Policy` turns off every feature
+the suite's Chromium knows (client hints aside) but the clipboard the
+challenge sheet copies to and pastes from, and the suite reads the allowed
+list back off the page; `web-share`, which the result card uses, is left at its
+default because Chromium on Linux does not know the name and warns. `no-referrer`, because a page address can
 carry a challenge code. The bundle and the font carry a content hash in their
 names and are cached for a year (`immutable`); everything else is `no-cache`,
 revalidated on every load, so a deploy never mixes an old page with a new
@@ -106,9 +128,19 @@ domain or subdomain of its own, which gives it an origin of its own.
 **Not found.** `404.html` is what a wrong address shows, in the Classic look
 and with no script; Netlify, Cloudflare Pages and GitHub Pages pick it up by
 themselves and the Apache and nginx configs wire it in, also for a folder with
-no page of its own. Both configs refuse dotfiles (`.well-known/` excepted), the
-hosting files and Expo's `metadata.json`, and `_redirects` does the same on
-Netlify; the build leaves `metadata.json` out anyway, since the page never
+no page of its own. The Apache and nginx configs serve the site's own
+addresses and nothing else: the page, the 404 page, `guard.js`, the tab icon,
+`robots.txt`, `security.txt`, the bundle and the icon font by the content hash
+in their names, and the certificate checks a webroot ACME client writes under
+`.well-known/acme-challenge/`. Everything else answers 404 there: the hosting
+files, folders, and every file of a checkout served by mistake
+(`src/__tests__/website.test.ts` walks `git ls-files` through both). Netlify
+has no such rule, so `_redirects` refuses the hosting files and Expo's
+`metadata.json` by name, with `404!`, since Netlify does not apply a plain rule
+where the file exists. Cloudflare Pages takes no 404 rules, so there
+`.htaccess` is served as a file, and GitHub Pages serves all three; they hold
+the same public headers, nothing secret. On every host, publish the folder the
+build writes. The build leaves `metadata.json` out anyway, since the page never
 reads it.
 
 **When something fails.** `guard.js` loads before the bundle and depends on
@@ -152,7 +184,9 @@ There is one challenge slot, and a link is written by whoever sent it, so
 following one never throws a challenge away: the link of the challenge already
 being played carries on where it was (a reload reads the address again, and a
 phone can hand a link over twice), and a link to a different one replaces a
-challenge with moves in it only after asking.
+challenge with moves in it only after asking. Once the challenge a link named
+is won, or another challenge takes the slot, the website takes the link out of
+its address, so a reload does not start it over.
 
 This works because the game is deterministic in a particular way. The puzzle is
 `generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
@@ -204,10 +238,12 @@ plays the game in Chromium (Playwright): the first-run help, a move and its
 shift, a reload that restores the game, the settings and their confirmation, a
 challenge sent, copied and pasted, a board solved to the win sheet, a new
 game confirmed, challenge links followed, followed again, reloaded, posted a
-message and replaced, and a paste far longer than any challenge. It fails on any
-policy report, uncaught error, console error or request outside the site, and
-then breaks the page on purpose to check the safety net, the no-JavaScript note
-and the 404 page.
+message, replaced, won and reloaded, and a paste far longer than any challenge.
+It reads back which browser features the page is allowed, loads the site with
+no headers over plain http at a name that is not loopback, and measures which
+inline styles need `'unsafe-inline'`. It fails on any policy report, uncaught
+error, console error or request outside the site, and then breaks the page on
+purpose to check the safety net, the no-JavaScript note and the 404 page.
 
 GitHub Actions runs the same checks plus an Android and web Metro bundle and
 the end-to-end suite on every push (`.github/workflows/ci.yml`); a separate job runs
