@@ -7,9 +7,10 @@
  * console error, and any request outside the site, while it drives the game the way a visitor
  * does: the first-run help, a move and its shift, a reload that restores the game, the settings
  * sheet with its confirmation, a challenge copied and pasted through the clipboard, a board
- * solved to the win sheet and its result shared, and a new game confirmed. Then it breaks the
- * page on purpose to see the safety net (public/guard.js) and the no-JavaScript note, and reads
- * the 404 page.
+ * solved to the win sheet and its result shared, and a new game confirmed. It follows challenge
+ * links the way a page on another site could write them, posts the page a message, reloads, and
+ * pastes text far longer than any challenge. Then it breaks the page on purpose to see the
+ * safety net (public/guard.js) and the no-JavaScript note, and reads the 404 page.
  *
  *   npm run test:e2e
  */
@@ -154,12 +155,13 @@ async function open(context, seen) {
   });
   page.on('dialog', async (d) => {
     seen.dialogs.push(`${d.type()}: ${d.message()}`);
-    await d.accept();
+    await (seen.decline ? d.dismiss() : d.accept());
   });
   return page;
 }
 
-const fresh = () => ({ violations: [], errors: [], outside: [], dialogs: [] });
+/** What a page reported. Its dialogs are accepted, or dismissed while `decline` is set. */
+const fresh = () => ({ violations: [], errors: [], outside: [], dialogs: [], decline: false });
 const settle = (page, ms = 400) => page.waitForTimeout(ms);
 /** Whether `test` comes true within `ms`, polled: what the page shows next is not on a fixed clock. */
 const until = async (page, test, ms = 5000) => {
@@ -319,6 +321,138 @@ try {
   check('the safety net stays out of the way of a working app', await page.locator('#startup-failed').isHidden());
   report('the game', seen);
   await context.close();
+
+  // A challenge link. The site writes none (an invitation carries the app's own sudokuoku:// link
+  // and the bare code), but the page reads its own address for one, so anybody can write one: a
+  // page on another site can send its visitors to it. Following it again, or reloading, carries
+  // on with the challenge rather than starting it over; a message posted to the window is not a
+  // link; and a different challenge asks before it replaces one with moves in it.
+  {
+    const seen = fresh();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+    const page = await open(context, seen);
+    await page.goto(home, { waitUntil: 'load' });
+    await page.getByText('How Sudokuoku works').waitFor({ timeout: 15000 });
+    await closeSheet(page, 'How Sudokuoku works');
+    /** The code the challenge sheet offers for the board on screen. */
+    const copyCode = async () => {
+      await button(page, 'Challenge a friend').click();
+      await button(page, 'Copy code').click();
+      await settle(page);
+      const text = await page.evaluate(() => navigator.clipboard.readText());
+      await page.keyboard.press('Escape');
+      await button(page, 'Copy code').waitFor({ state: 'hidden', timeout: 5000 });
+      return text;
+    };
+    const first = await copyCode();
+    await button(page, 'New game').click();
+    await settle(page, 600);
+    const second = await copyCode();
+    check('two boards, two challenge codes', /^[A-Za-z0-9_-]{12,}$/.test(first) && /^[A-Za-z0-9_-]{12,}$/.test(second) && first !== second, `${first} ${second}`);
+    /** The challenge kept in the one challenge slot, as the page stored it. */
+    const kept = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:challenge:v1') ?? 'null'));
+    const follow = async (code) => {
+      await page.goto(`${home}?/c/${code}`, { waitUntil: 'load' });
+      await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+      await settle(page, 800);
+    };
+
+    await follow(first);
+    check('a challenge link opens its challenge', (await bodyText(page)).includes('Challenge · '));
+    const empties = page.getByRole('button', { name: /^Row \d, column \d, empty/ });
+    for (const n of [1, 2]) {
+      await empties.first().click();
+      await button(page, 'Hint').click();
+      await until(page, async () => (await stat(page, 'Moves')) === n);
+    }
+    const playing = await kept();
+    check('two moves are made in it, and kept', playing?.moves === 2 && playing?.mode === 'challenge', JSON.stringify(playing?.moves));
+
+    await page.evaluate(() => window.postMessage('a message, from anyone', '*'));
+    await settle(page, 1000);
+    check('a message posted to the page does not start the challenge over', (await stat(page, 'Moves')) === 2 && (await kept())?.moves === 2, `${await stat(page, 'Moves')}`);
+
+    await page.reload({ waitUntil: 'load' });
+    await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+    check(
+      'a reload, which reads the link again, carries on with the challenge',
+      (await until(page, async () => (await stat(page, 'Moves')) === 2)) && (await bodyText(page)).includes('Challenge · ') && (await kept())?.seed === playing?.seed,
+      `${await stat(page, 'Moves')}`
+    );
+    await follow(first);
+    check('and so does following the same link again', (await until(page, async () => (await stat(page, 'Moves')) === 2)) && (await kept())?.moves === 2);
+    // Away from the challenge, with its link still in the address: a message is still not a link.
+    await button(page, 'New game').click();
+    check('New game leaves the challenge for a free game', await until(page, async () => !(await bodyText(page)).includes('Challenge · ')));
+    const asked = seen.dialogs.length;
+    await page.evaluate(() => window.postMessage('a message, from anyone', '*'));
+    await settle(page, 1000);
+    check(
+      'a message posted to the page does not open the address it was loaded from',
+      !(await bodyText(page)).includes('Challenge · ') && seen.dialogs.length === asked && (await kept())?.moves === 2,
+      seen.dialogs.slice(asked).join(' | ')
+    );
+
+    seen.decline = true;
+    await follow(second);
+    seen.decline = false;
+    check('a link to another challenge asks before it replaces this one', seen.dialogs.some((d) => d.startsWith('confirm: Start a new challenge?')), seen.dialogs.join(' | '));
+    const declined = await kept();
+    check('and declined, the challenge in progress is kept', declined?.seed === playing?.seed && declined?.moves === 2, JSON.stringify([declined?.seed, declined?.moves]));
+    await follow(second);
+    const replaced = await kept();
+    check('and accepted, the new challenge starts', (await bodyText(page)).includes('Challenge · ') && replaced?.seed !== playing?.seed && (await stat(page, 'Moves')) === 0);
+    report('challenge links', seen);
+    await context.close();
+  }
+
+  // A long paste. Paste from clipboard reads whatever is there, and a page can put anything there
+  // when its text is copied: a run of `?` with a line after it held the page for 13 seconds in the
+  // pattern that took a link apart, and a megabyte drawn in the field for as long again.
+  {
+    const seen = fresh();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+    const page = await open(context, seen);
+    await page.goto(home, { waitUntil: 'load' });
+    await page.getByText('How Sudokuoku works').waitFor({ timeout: 15000 });
+    await closeSheet(page, 'How Sudokuoku works');
+    await button(page, 'Challenge a friend').click();
+    await button(page, 'Paste from clipboard').waitFor();
+    // How long the page went without running a timer that asks every 50 ms, from here on.
+    await page.evaluate(() => {
+      let last = performance.now();
+      window.__stalls = [];
+      setInterval(() => {
+        const now = performance.now();
+        window.__stalls.push(now - last);
+        last = now;
+      }, 50);
+    });
+    for (const [label, text] of [
+      ['100,000 question marks and a second line', `${'?'.repeat(100000)}\nx`],
+      ['a megabyte without a break', `${'A'.repeat(1000000)}\nx`],
+    ]) {
+      await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+      await page.getByLabel('Challenge code').fill(''); // which clears the last paste's error
+      await page.evaluate(() => (window.__stalls.length = 0));
+      await button(page, 'Paste from clipboard').click();
+      await settle(page, 1500);
+      // An evaluate waits for the page, and this one for the timer's next turn as well, so a
+      // stall in progress is measured whole.
+      const longest = await page.evaluate(
+        () => new Promise((done) => setTimeout(() => done(Math.round(Math.max(0, ...window.__stalls))), 200))
+      );
+      check(
+        `a paste of ${label} is refused without holding up the page`,
+        longest < 1000 && (await bodyText(page)).includes('That challenge code is too long to open safely.'),
+        `longest stall ${longest} ms`
+      );
+    }
+    report('a long paste', seen);
+    await context.close();
+  }
 
   // The safety net: a bundle that never arrives, one that throws as it starts, and one that
   // runs without drawing anything (as one the policy refused would, with no error to hear).

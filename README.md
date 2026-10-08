@@ -145,7 +145,14 @@ Any board can be handed to someone else as a short code or a link. There is no
 server involved: the whole challenge travels inside the string. The link is
 `sudokuoku://c/<code>`, which opens the app where it is installed; the invite
 carries the bare code too, for messengers that do not turn that into a link,
-and the challenge sheet takes either one pasted in.
+and the challenge sheet takes either one pasted in. The website reads a code in
+its own address the same way (`…/#/c/<code>`).
+
+There is one challenge slot, and a link is written by whoever sent it, so
+following one never throws a challenge away: the link of the challenge already
+being played carries on where it was (a reload reads the address again, and a
+phone can hand a link over twice), and a link to a different one replaces a
+challenge with moves in it only after asking.
 
 This works because the game is deterministic in a particular way. The puzzle is
 `generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
@@ -195,10 +202,12 @@ npm run test:all          # npm test, then npm run test:e2e
 host would, sending the headers exactly as `public/_headers` writes them, then
 plays the game in Chromium (Playwright): the first-run help, a move and its
 shift, a reload that restores the game, the settings and their confirmation, a
-challenge sent, copied and pasted, a board solved to the win sheet, and a new
-game confirmed. It fails on any policy report, uncaught error, console error or
-request outside the site, and then breaks the page on purpose to check the
-safety net, the no-JavaScript note and the 404 page.
+challenge sent, copied and pasted, a board solved to the win sheet, a new
+game confirmed, challenge links followed, followed again, reloaded, posted a
+message and replaced, and a paste far longer than any challenge. It fails on any
+policy report, uncaught error, console error or request outside the site, and
+then breaks the page on purpose to check the safety net, the no-JavaScript note
+and the 404 page.
 
 GitHub Actions runs the same checks plus an Android and web Metro bundle and
 the end-to-end suite on every push (`.github/workflows/ci.yml`); a separate job runs

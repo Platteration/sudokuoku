@@ -8,6 +8,7 @@ import {
   decodeChallenge,
   encodeChallenge,
   ghostRemainingAt,
+  receiveChallenge,
   replayGhost,
   startChallenge,
 } from '../challenge';
@@ -319,5 +320,48 @@ describe('the move log', () => {
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.challenge.rules.enabledShifts).toEqual(ALL_SHIFT_KINDS);
+  });
+});
+
+describe('receiving a challenge over the one in progress', () => {
+  /** A challenge game with `moves` placements made in it. */
+  function playing(challenge: Challenge, moves: number): GameState {
+    let s = startChallenge(base, challenge);
+    for (let i = 0; i < moves; i++) {
+      const q = s.values.findIndex((v) => v === 0);
+      s = reduce(reduce(s, { type: 'select', pos: q }), { type: 'input', digit: s.solution[q]!, now: 0 });
+    }
+    expect(s.moves).toBe(moves);
+    return s;
+  }
+  const other = sample({ seed: 12345 });
+
+  it('starts it when there is no challenge, or none still being played', () => {
+    expect(receiveChallenge(null, null, sample())).toBe('start');
+    expect(receiveChallenge(undefined, sample(), sample())).toBe('start');
+    expect(receiveChallenge({ ...playing(other, 3), status: 'won' }, other, sample())).toBe('start');
+  });
+
+  it('resumes the challenge in progress when the same one arrives again', () => {
+    // A reload reads the address again, and a phone can hand a link over twice.
+    expect(receiveChallenge(playing(sample(), 3), sample(), sample())).toBe('resume');
+    // The same challenge through a fresh decode of its own code.
+    const again = decodeChallenge(encodeChallenge(sample()));
+    if (!again.ok) throw new Error(again.error);
+    expect(receiveChallenge(playing(sample(), 3), sample(), again.challenge)).toBe('resume');
+    expect(receiveChallenge(playing(sample(), 0), sample(), sample())).toBe('resume');
+  });
+
+  it('asks before a different one replaces a challenge with moves in it', () => {
+    expect(receiveChallenge(playing(sample(), 1), sample(), other)).toBe('ask');
+    // The same board with a ghost attached is another race.
+    const raced = sample({ ghost: { moves: [{ token: 3, digit: 4, seconds: 9 }], totalSeconds: 60, hints: 0 } });
+    expect(receiveChallenge(playing(sample(), 2), sample(), raced)).toBe('ask');
+    // With no code to compare against, a challenge in progress is not assumed to be this one.
+    expect(receiveChallenge(playing(sample(), 2), null, sample())).toBe('ask');
+  });
+
+  it('replaces a challenge nobody has made a move in yet without asking', () => {
+    expect(receiveChallenge(playing(sample(), 0), sample(), other)).toBe('start');
   });
 });

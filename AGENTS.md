@@ -159,7 +159,13 @@ the manifest walk fails on any permission the module declares that is neither us
 blocked. The one URL the app takes in is a challenge link, `sudokuoku://c/<code>`
 (`scheme` in app.json), heard by the game screen alone and read through
 `decodeChallenge`; the invite carries the bare code as well, since not every messenger
-turns a custom scheme into a link.
+turns a custom scheme into a link. A link is written by whoever sent it, so what one may
+do to the single challenge slot is `receiveChallenge`'s (`src/engine/challenge.ts`): the
+challenge in progress resumes, and a different one replaces a challenge with moves in it
+only after `confirmAction` asks. On the web the page reads a `/c/<code>` in its own
+address once, at load, and does not subscribe to `url`: expo-linking's web `url` event is
+every `message` posted to the window, from any origin, reported with the page's unchanged
+address, so subscribing let any opener, frame or extension restart a challenge.
 
 ## Website
 

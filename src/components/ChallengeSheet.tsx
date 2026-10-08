@@ -9,6 +9,7 @@ import {
   encodeChallenge,
 } from '../engine';
 import { Colors, radius, useStyles, useTheme } from '../theme';
+import { parseChallengeInput } from '../utils/challengeInput';
 import { formatTime } from '../utils/time';
 import PrimaryButton from './PrimaryButton';
 import Sheet from './Sheet';
@@ -56,22 +57,6 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
   const [copied, setCopied] = useState(false);
   const MAX_CHALLENGE_CODE_LENGTH = 24000;
 
-  const parseChallengeInput = (raw: string): string => {
-    const trimmed = raw.trim();
-    if (!trimmed) return '';
-    const fromQuery = /[?&#]code=([^&#]+)/.exec(trimmed);
-    const fromQueryCode = fromQuery?.[1];
-    if (fromQueryCode !== undefined) {
-      try {
-        return decodeURIComponent(fromQueryCode);
-      } catch {
-        return fromQueryCode;
-      }
-    }
-    const afterSlash = trimmed.lastIndexOf('/') >= 0 ? trimmed.slice(trimmed.lastIndexOf('/') + 1) : trimmed;
-    return afterSlash.replace(/[?#].*$/, '');
-  };
-
   // A finished game can carry the solve as a ghost to race against.
   const canSendGhost = state.status === 'won' && state.log.length > 0;
   const outgoing = challengeFromState(state, canSendGhost);
@@ -113,7 +98,10 @@ export default function ChallengeSheet({ visible, state, active, onClose, onPlay
     try {
       const text = await Clipboard.getStringAsync();
       if (text) {
-        setPasted(text);
+        // The field holds what its maxLength lets it, as it does for a paste
+        // into it: the clipboard can hold anything, and drawing a megabyte
+        // of it in the field held the page for 13 seconds in Chromium.
+        setPasted(text.slice(0, MAX_CHALLENGE_CODE_LENGTH));
         open(text);
       }
     } catch {

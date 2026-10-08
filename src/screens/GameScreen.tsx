@@ -35,6 +35,7 @@ import {
   GameState,
   decodeChallenge,
   encodeChallenge,
+  receiveChallenge,
   startChallenge,
   Profile,
   Settings,
@@ -426,6 +427,36 @@ function GameView({
     [state, profile, park, show, updateProfile, setChallengeInfo],
   );
 
+  /**
+   * A challenge from a link, which whoever wrote it can make the app follow.
+   * There is one challenge slot, so the one already being played is resumed
+   * rather than started over, and a different one replaces a challenge with
+   * moves in it only once the player says so (see receiveChallenge). The
+   * sheet's Play this board is the player's own choice and starts its board.
+   */
+  const offerChallenge = useCallback(
+    (challenge: Challenge) => {
+      const current = state.mode === 'challenge' ? state : parked.current.challenge;
+      switch (receiveChallenge(current, challengeInfo, challenge)) {
+        case 'resume':
+          switchTo('challenge');
+          return;
+        case 'ask':
+          confirmAction({
+            title: 'Start a new challenge?',
+            message: 'The challenge you are playing will be lost.',
+            cancelLabel: 'Keep playing',
+            confirmLabel: 'New challenge',
+            onConfirm: () => openChallenge(challenge),
+          });
+          return;
+        case 'start':
+          openChallenge(challenge);
+      }
+    },
+    [state, challengeInfo, switchTo, openChallenge],
+  );
+
   /** Always starts a fresh *free* game, parking whatever was on screen. */
   const startNewGame = useCallback(
     (difficulty?: Difficulty) => {
@@ -475,8 +506,8 @@ function GameView({
 
   // A tapped challenge link, whether it cold-started the app or arrived while
   // it was already open: sudokuoku://c/<code>, the link challengeLink writes.
-  const openChallengeRef = useRef(openChallenge);
-  openChallengeRef.current = openChallenge;
+  const offerChallengeRef = useRef(offerChallenge);
+  offerChallengeRef.current = offerChallenge;
 
   const getChallengeCode = (url: string): string | null => {
     const match = /\/c\/([^/?#]+)/.exec(url);
@@ -500,17 +531,23 @@ function GameView({
       if (!code) return;
       const result = decodeChallenge(code);
       if (result.ok) {
-        openChallengeRef.current(result.challenge);
+        offerChallengeRef.current(result.challenge);
       } else {
         notify('That challenge could not be opened', result.error);
       }
     };
 
     Linking.getInitialURL().then(handle);
-    const sub = Linking.addEventListener('url', (event) => handle(event.url));
+    // In a browser a link from elsewhere loads the page, and the address is
+    // read above. The 'url' event there is every message posted to the window,
+    // from any origin, reported with the page's own unchanged address, so all
+    // it could do is open that address again: one postMessage from an opener,
+    // a frame or an extension restarted a challenge the page was opened with,
+    // moves and all.
+    const sub = Platform.OS === 'web' ? null : Linking.addEventListener('url', (event) => handle(event.url));
     return () => {
       cancelled = true;
-      sub.remove();
+      sub?.remove();
     };
   }, []);
 

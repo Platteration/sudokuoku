@@ -352,6 +352,35 @@ export function challengeFromState(state: GameState, withGhost: boolean): Challe
   };
 }
 
+/**
+ * What receiving `incoming` does to the one challenge slot, given the
+ * challenge game kept there (`current`, on screen or parked) and the
+ * challenge it was started from (`currentFrom`, null when its code could not
+ * be read back).
+ *
+ * - `resume`: it is the challenge in progress, so the player carries on where
+ *   they were. A link is not consumed when it is followed: a browser keeps it
+ *   in the address bar and reads it again on every reload, and a phone can
+ *   hand the same one over again, so starting it afresh each time threw the
+ *   game away.
+ * - `ask`: it is a different challenge and the one in progress has moves in
+ *   it, which starting the new one would destroy. A link is opened by
+ *   whoever wrote it, so that is the player's to decide, not the link's.
+ * - `start`: nothing would be lost.
+ */
+export type ReceiveChallenge = 'resume' | 'ask' | 'start';
+
+export function receiveChallenge(
+  current: GameState | null | undefined,
+  currentFrom: Challenge | null,
+  incoming: Challenge,
+): ReceiveChallenge {
+  if (!current || current.status !== 'playing') return 'start';
+  // The code is the challenge's canonical form: the same board, rules and ghost.
+  if (currentFrom && encodeChallenge(currentFrom) === encodeChallenge(incoming)) return 'resume';
+  return current.moves > 0 ? 'ask' : 'start';
+}
+
 /** Starts the game a challenge describes. */
 export function startChallenge(base: Settings, challenge: Challenge): GameState {
   return newGame(challengeSettings(base, challenge), challenge.seed, { mode: 'challenge' });
