@@ -192,8 +192,8 @@ base path, so a hash would differ per deployment); nothing needs an inline scrip
 calls. A `Permissions-Policy` feature Chromium does not know is a console warning that fails the
 suite (`web-share`, `bluetooth` and `ambient-light-sensor` are unknown to Linux Chromium), so
 only features it recognises are listed. In `_headers` a header is set by one rule per path:
-both hosts join the values of two matching rules, so `Cache-Control` is listed by path rather
-than under `/*`. `public/guard.js` is the safety net, loaded in `<head>` before the bundle:
+Cloudflare Pages joins the values of two matching rules, so `Cache-Control` is listed by path
+rather than under `/*`. `public/guard.js` is the safety net, loaded in `<head>` before the bundle:
 it shows `#startup-failed` when the bundle fails to load, throws, or draws nothing within four
 seconds of `load`, never builds markup from a string, and is scanned by `appConfig.test.ts`
 with the app's own code for network APIs. On the web the Vibration row is disabled with a note

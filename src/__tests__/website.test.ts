@@ -279,7 +279,7 @@ describe('caching', () => {
     const apache = (p: string) => (new RegExp(apacheIf![1]!).test(p) ? apacheIf![2] : apacheIf![3]);
     for (const p of [...SITE, '/404.html']) {
       const { headers, duplicates } = headersFor(rules, p);
-      expect(duplicates, p).toEqual([]); // both hosts would join two values into one
+      expect(duplicates, p).toEqual([]); // Cloudflare Pages would join two values into one
       expect(headers['cache-control'], `_headers ${p}`).toBe(expected(p));
       expect(nginx(p), `nginx ${p}`).toBe(expected(p));
       expect(apache(p), `Apache ${p}`).toBe(expected(p));

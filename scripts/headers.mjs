@@ -36,8 +36,8 @@ export function pathMatches(pattern, path) {
 
 /**
  * The headers `rules` give a path, by lower-case name. Two matching rules that set one header
- * have their values joined, which is what both hosts do; `duplicates` names any such header so
- * a test can refuse it.
+ * have their values joined, as Cloudflare Pages joins them; `duplicates` names any such header
+ * so a test can refuse it, since what a host makes of two values is not this site's to rely on.
  */
 export function headersFor(rules, path) {
   /** @type {Record<string, string>} */

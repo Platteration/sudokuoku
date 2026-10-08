@@ -94,7 +94,7 @@ const site = await serveSite({ dir: OUT, base: BASE });
 const { origin } = site;
 const home = `${origin}${BASE}/`;
 
-// Both hosts join the values of a header that two matching rules set: `no-cache, public, ...`.
+// Cloudflare Pages joins the values of a header that two matching rules set: `no-cache, public, ...`.
 const twice = ['/', ...files.map((f) => `/${f}`)].flatMap((path) => headersFor(site.rules, path).duplicates.map((name) => `${path}: ${name}`));
 check('_headers sets no header twice for any file the site has', twice.length === 0, twice.join(', '));
 

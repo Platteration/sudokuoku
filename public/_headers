@@ -33,8 +33,9 @@
   Cache-Control: public, max-age=31536000, immutable
 
 # Everything else keeps its name from build to build and is revalidated on every load (an
-# unchanged file costs a 304). These are listed by name rather than under /*, because both
-# hosts join the values of a header that two matching rules set.
+# unchanged file costs a 304). These are listed by name rather than under /*: Cloudflare Pages
+# joins the values of a header that two matching rules set, which would send the bundle
+# "no-cache, public, max-age=31536000, immutable", so no path gets a header from two rules.
 /
   Cache-Control: no-cache
 
