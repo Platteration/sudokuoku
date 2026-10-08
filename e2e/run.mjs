@@ -161,13 +161,23 @@ async function open(context, seen) {
 
 const fresh = () => ({ violations: [], errors: [], outside: [], dialogs: [] });
 const settle = (page, ms = 400) => page.waitForTimeout(ms);
+/** Whether `test` comes true within `ms`, polled: what the page shows next is not on a fixed clock. */
+const until = async (page, test, ms = 5000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await page.waitForTimeout(50)) if (await test()) return true;
+  return test();
+};
 const bodyText = (page) => page.locator('body').innerText();
 const stat = async (page, label) => Number(new RegExp(`(\\d+)\\s*\\n\\s*${label}\\b`).exec(await bodyText(page))?.[1] ?? NaN);
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 const emptyCell = (page) => page.getByRole('button', { name: /^Row \d, column \d, empty/ }).first();
-const closeSheet = async (page) => {
-  await page.getByRole('button', { name: 'Close', exact: true }).last().click();
-  await settle(page, 600);
+/**
+ * Closes the sheet titled `title` with its own close button, and waits until it has gone: the
+ * last Close in the page can belong to a sheet still sliding out.
+ */
+const closeSheet = async (page, title) => {
+  const heading = page.getByText(title, { exact: true });
+  await heading.locator('xpath=following-sibling::*[@aria-label="Close"][1]').click();
+  await heading.waitFor({ state: 'hidden', timeout: 5000 });
 };
 const report = (label, seen) => {
   check(`${label}: no policy violation`, seen.violations.length === 0, seen.violations.join(' | '));
@@ -229,22 +239,19 @@ try {
       })
   );
   check('the tab icon the page names loads under the policy', icon === `loaded ${BASE}/favicon.ico`, String(icon));
-  await closeSheet(page);
+  await closeSheet(page, 'How Sudokuoku works');
 
   await emptyCell(page).click();
   await button(page, 'Enter 5').click();
-  await settle(page, 1200);
-  check('a move counts', (await stat(page, 'Moves')) === 1);
-  check('and the board shifts after it', (await stat(page, 'Shifts')) >= 1);
+  check('a move counts', await until(page, async () => (await stat(page, 'Moves')) === 1));
+  check('and the board shifts after it', await until(page, async () => (await stat(page, 'Shifts')) >= 1));
 
   await page.reload({ waitUntil: 'load' });
   await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
-  await settle(page, 800);
-  check('a reload restores the game in progress', (await stat(page, 'Moves')) === 1);
+  check('a reload restores the game in progress', await until(page, async () => (await stat(page, 'Moves')) === 1));
   check('and remembers that the help was seen', !(await page.getByText('How Sudokuoku works').isVisible()));
   await button(page, 'Undo').click();
-  await settle(page, 1000);
-  check('undo takes the move back', (await stat(page, 'Moves')) === 0);
+  check('undo takes the move back', await until(page, async () => (await stat(page, 'Moves')) === 0));
 
   // Settings: a web visitor reads why Vibration is off rather than flipping a switch that does nothing.
   await button(page, 'Settings').click();
@@ -261,7 +268,7 @@ try {
   await settle(page, 600);
   check('Reset to defaults asks first, in the browser', seen.dialogs.some((d) => d.startsWith('confirm: Reset settings?')));
   check('and puts the setting back', (await conflicts.getAttribute('aria-checked')) === before);
-  await closeSheet(page);
+  await closeSheet(page, 'Settings');
 
   // A challenge: sent (a browser with no share sheet shows the invitation instead), copied out
   // and pasted back in through the clipboard, and solved with hints, cell by cell, through every
@@ -278,9 +285,14 @@ try {
   await button(page, 'Paste from clipboard').click();
   await settle(page, 1000);
   check('Paste from clipboard opens that challenge', (await bodyText(page)).includes('Challenge · '));
-  for (let i = 0; i < 81 && !(await page.getByText('Solved!').isVisible()); i += 1) {
-    await emptyCell(page).click();
+  // One hint at a time, each waited for: the last one fills the board while the win sheet is
+  // still on its way in, so the loop counts empty cells rather than looking for the sheet.
+  const empties = page.getByRole('button', { name: /^Row \d, column \d, empty/ });
+  for (let i = 0; i < 81 && (await empties.count()) > 0; i += 1) {
+    const moves = await stat(page, 'Moves');
+    await empties.first().click();
     await button(page, 'Hint').click();
+    await until(page, async () => (await stat(page, 'Moves')) === moves + 1);
   }
   await page.getByText('Solved!').waitFor({ timeout: 10000 });
   check('the board can be solved to the win sheet', true);
@@ -290,10 +302,10 @@ try {
   // Daily and progress, opened and closed.
   await button(page, 'Daily challenge').click();
   await page.getByText('Play today’s daily').waitFor();
-  await closeSheet(page);
+  await closeSheet(page, 'Daily challenge');
   await button(page, 'Progress').click();
   await page.getByText('Shifts survived').waitFor();
-  await closeSheet(page);
+  await closeSheet(page, 'Progress');
 
   // A new game over a game in progress is confirmed.
   await emptyCell(page).click();
@@ -302,7 +314,7 @@ try {
   await button(page, 'New game').click();
   await settle(page, 800);
   check('New game over a game in progress asks first', seen.dialogs.some((d) => d.startsWith('confirm: Start a new free game?')));
-  check('and starts one', (await stat(page, 'Moves')) === 0);
+  check('and starts one', await until(page, async () => (await stat(page, 'Moves')) === 0));
 
   check('the safety net stays out of the way of a working app', await page.locator('#startup-failed').isHidden());
   report('the game', seen);
