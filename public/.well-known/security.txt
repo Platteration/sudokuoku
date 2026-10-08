@@ -1,0 +1,5 @@
+# Sudokuoku. How to report a security problem: SECURITY.md, linked below.
+Contact: https://github.com/Platteration/sudokuoku/issues
+Expires: 2027-10-07T00:00:00.000Z
+Preferred-Languages: en
+Policy: https://github.com/Platteration/sudokuoku/blob/HEAD/SECURITY.md

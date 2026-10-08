@@ -73,7 +73,10 @@ const manifestsUnder = (dir: string): string[] => {
   return out;
 };
 
-/** The app's own code: everything under src/ that is not a test, plus the entry files. */
+/**
+ * The app's own code: everything under src/ that is not a test, plus the entry files and the
+ * one script the website loads beside the bundle, its safety net.
+ */
 const appSource = (): string => {
   const sources: string[] = [];
   const walk = (dir: string) => {
@@ -87,7 +90,7 @@ const appSource = (): string => {
     }
   };
   walk(path.join(root, 'src'));
-  for (const file of ['App.tsx', 'index.ts']) {
+  for (const file of ['App.tsx', 'index.ts', 'public/guard.js']) {
     sources.push(fs.readFileSync(path.join(root, file), 'utf8'));
   }
   expect(sources.length).toBeGreaterThan(10); // the walk found the app

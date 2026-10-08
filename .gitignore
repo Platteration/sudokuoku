@@ -37,6 +37,10 @@ yarn-error.*
 /ios
 /android
 
+# project
+# the website the end-to-end suite builds (npm run build:web writes dist/, above)
+.web-build/
+
 # editors
 .vscode/
 .idea/

@@ -10,6 +10,8 @@ for the rules and layout.
 - Engine lives in `src/engine` and must stay free of React/React Native imports.
 - `npm test` runs the vitest suites, `npm run typecheck` runs tsc, `npm run lint`
   runs ESLint, and `npm run check` runs all three plus the conventions test.
+  `npm run test:e2e` builds the website and plays it in Chromium under its own
+  headers (see "Website" in AGENTS.md); `npm run test:all` runs both suites.
 - A save is untrusted input (`src/utils/saved.ts`): on the web build AsyncStorage
   is localStorage, which anything on the origin can edit, and on a device a bad
   backup restore does the same job. Nothing in the app clears a save by hand, so

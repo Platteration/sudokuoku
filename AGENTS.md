@@ -161,6 +161,45 @@ blocked. The one URL the app takes in is a challenge link, `sudokuoku://c/<code>
 `decodeChallenge`; the invite carries the bare code as well, since not every messenger
 turns a custom scheme into a link.
 
+## Website
+
+The web build is a website as well as a preview: `npm run build:web` writes `dist/`, the
+Expo web export with `public/` copied in whole (SDK 57's `copyPublicFolderAsync` is
+`fs.promises.cp`, so `public/.htaccess` and `public/.well-known/` arrive; the build fails if
+one does not). `public/index.html` is Expo's web template, of which Expo fills in only
+`%LANG_ISO_CODE%` and `%WEB_TITLE%` and adds the favicon link and the bundle's `<script defer>`
+with `experiments.baseUrl` in front. A sub-path build is `WEB_BASE_PATH=/sudokuoku npm run
+build:web`: `app.config.js` turns the variable into `experiments.baseUrl` for that run and
+otherwise returns `app.json` untouched (the object itself, which `website.test.ts` pins, so no
+native build sees a difference), and `scripts/build-web.mjs` prefixes the site-absolute URLs in
+`public/`'s two pages and Apache's `ErrorDocument` lines, which Expo leaves alone, and removes
+Expo's `metadata.json`, which the page never reads. The host does the under-the-hood work: one
+policy, written in `public/_headers` (Netlify, Cloudflare Pages), `public/.htaccess` (Apache),
+`deploy/nginx.conf` (outside the published folder) and the README, and copied by the build from
+`_headers` into both pages' `<meta>` (less `frame-ancestors`). Never into the template: `npm run
+web` serves it too, and under the policy Metro's reload socket is refused and its error overlay,
+which writes HTML from strings, breaks the dev page (measured). `src/__tests__/website.test.ts`
+holds every copy equal and holds the deny and cache rules of the three hosts to one sample of
+paths. Every value is measured
+by `npm run test:e2e`, which builds for `/sudokuoku`, serves the folder with the headers exactly
+as `_headers` writes them (`e2e/serve.mjs`) and plays the game in Chromium, failing on any
+`securitypolicyviolation`, console error, page error or request outside the site. What it
+measured: `style-src` needs `'unsafe-inline'` (react-native-web's stylesheet and expo-font's
+`@font-face` are `<style>` elements written at run time, and the font-face text holds the
+base path, so a hash would differ per deployment); nothing needs an inline script, eval, a
+`data:`/`blob:` source or a connection, and Trusted Types hold (`require-trusted-types-for
+'script'; trusted-types 'none'`), since React and react-native-web build the DOM with DOM
+calls. A `Permissions-Policy` feature Chromium does not know is a console warning that fails the
+suite (`web-share`, `bluetooth` and `ambient-light-sensor` are unknown to Linux Chromium), so
+only features it recognises are listed. In `_headers` a header is set by one rule per path:
+both hosts join the values of two matching rules, so `Cache-Control` is listed by path rather
+than under `/*`. `public/guard.js` is the safety net, loaded in `<head>` before the bundle:
+it shows `#startup-failed` when the bundle fails to load, throws, or draws nothing within four
+seconds of `load`, never builds markup from a string, and is scanned by `appConfig.test.ts`
+with the app's own code for network APIs. On the web the Vibration row is disabled with a note
+(`expo-haptics` does nothing in a browser), the share fallback is `window.alert`, and
+confirmations are `window.confirm` (`src/confirm.ts`).
+
 ## Settings
 
 Preferences follow the shared settings contract (`CONVENTIONS.md`, "User-facing

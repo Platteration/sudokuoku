@@ -1,0 +1,4 @@
+# Sudokuoku: a single page, the game itself. Saved games stay in each visitor's browser and
+# are never on the site.
+User-agent: *
+Allow: /

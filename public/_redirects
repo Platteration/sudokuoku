@@ -1,0 +1,6 @@
+# Netlify: what the export puts in the published folder that is not part of the site.
+# (Cloudflare Pages takes no 404 rules from this file.)
+/_headers        /404.html  404
+/_redirects      /404.html  404
+/.htaccess       /404.html  404
+/metadata.json   /404.html  404

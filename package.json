@@ -25,6 +25,7 @@
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.2",
     "globals": "^16.0.0",
+    "playwright": "^1.56.1",
     "typescript": "~6.0.3",
     "vitest": "^3.2.7"
   },
@@ -33,11 +34,14 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build:web": "node scripts/build-web.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:conventions": "node --test test/conventions.mjs",
+    "test:e2e": "node e2e/run.mjs",
+    "test:all": "npm test && npm run test:e2e",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:conventions"
   },
   "private": true,

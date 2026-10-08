@@ -1,0 +1,50 @@
+# Sudokuoku on Apache 2.4 (mod_rewrite, mod_headers). npm run build:web copies this file from
+# public/ into the published folder; Netlify and Cloudflare Pages read _headers beside it, and
+# nginx takes deploy/nginx.conf from the repository. The values are the same in all of them
+# (src/__tests__/website.test.ts); _headers says why each one is what it is.
+
+Options -Indexes
+ServerSignature Off
+AddDefaultCharset utf-8
+# A build for a sub-path has these two prefixed with it (scripts/build-web.mjs).
+ErrorDocument 404 /404.html
+ErrorDocument 403 /404.html
+
+<IfModule mod_mime.c>
+  AddType text/javascript .js
+  AddType font/ttf .ttf
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # everything over https
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+  # never a dotfile (this one, a .git folder), except the security contact in .well-known
+  RewriteRule (^|/)\.(?!well-known/) - [R=404,L]
+  # the hosting configs and Expo's update manifest are not part of the site, nor are the
+  # repository's own files if a checkout is ever served by mistake
+  RewriteRule ^(_headers|_redirects|metadata\.json|README\.md|deploy(/.*)?)$ - [R=404,L]
+  # a folder with no page of its own (_expo/, assets/) is a 404, not a 403 that hints at a listing
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^.+$ - [R=404,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Permissions-Policy "accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), xr-spatial-tracking=()"
+  Header always set Cross-Origin-Opener-Policy "same-origin"
+  Header always set Cross-Origin-Resource-Policy "same-origin"
+  # Browsers ignore this header on plain http, and every http request is redirected above.
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  <If "%{REQUEST_URI} =~ m#/(_expo/static|assets)/#">
+    Header always set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  <Else>
+    Header always set Cache-Control "no-cache"
+  </Else>
+</IfModule>

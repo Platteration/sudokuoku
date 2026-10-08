@@ -1,13 +1,15 @@
 # Sudokuoku
 
-Sudoku for iOS and Android with a twist: after every move the board **shifts**,
+Sudoku for iOS, Android and the web with a twist: after every move the board **shifts**,
 and you never know which shift is coming. Rows slide, columns slide, the whole
 board rotates or flips, every 3×3 box slides its contents. Every shift keeps
 the puzzle exactly as solvable as it was, and everything you have entered stays
 where it belongs.
 
 Built with [Expo](https://expo.dev) (React Native + TypeScript). One codebase
-targets iOS, Android and, for quick previews, the web.
+targets iOS, Android and a website, which plays entirely in the browser: the
+puzzle is generated there and the games are kept there, and nothing is sent
+anywhere.
 
 ## Running it
 
@@ -17,11 +19,125 @@ npm start          # then scan the QR code with Expo Go on iOS or Android
 npm run ios        # iOS simulator (macOS with Xcode)
 npm run android    # Android emulator or a connected device
 npm run web        # browser preview
+npm run build:web  # the website, in dist/ (see Deploy)
 ```
+
+### Native builds
 
 Store builds use [EAS Build](https://docs.expo.dev/build/introduction/):
 `npx eas build --platform ios` / `--platform android`. Bundle identifiers are
 set in `app.json`.
+
+### Deploy
+
+The website is one folder. `npm run build:web` writes it to `dist/`: the page
+(`index.html`), the app's bundle under `_expo/static/`, the icon font under
+`assets/`, the safety net (`guard.js`), `404.html`, `favicon.ico`,
+`robots.txt`, `.well-known/security.txt`, and the three hosting files
+`_headers` (Netlify, Cloudflare Pages), `_redirects` (Netlify) and `.htaccess`
+(Apache), each of which the other hosts ignore. They come from `public/`, which
+the export copies whole. Publish `dist/` as it is: on Netlify or Cloudflare
+Pages the build command is `npm run build:web` and the publish directory
+`dist`; on Apache copy the folder into the document root (`.htaccess` travels
+with it, and takes effect where the server allows it, `AllowOverride All`, and
+has `mod_rewrite` and `mod_headers`); on nginx copy it to the
+server and include `deploy/nginx.conf`, after setting its `server_name`, `root`
+and certificate paths. Never point a server at the checkout.
+
+The build serves from a domain's root. To serve it under a path instead (a
+GitHub Pages project site is `https://<user>.github.io/sudokuoku/`), build with
+`WEB_BASE_PATH=/sudokuoku npm run build:web`: `app.config.js` turns that into
+Expo's `experiments.baseUrl`, which prefixes every address the export writes,
+and the build script prefixes the addresses in `public/`'s pages and Apache's
+error pages the same way. Without the variable the configuration is `app.json`
+exactly, so no native build is affected.
+
+**HTTPS only**, with plain `http://` redirected: the Apache and nginx configs
+do it, and Netlify, Cloudflare Pages and GitHub Pages have a switch for it. The
+clipboard the challenge sheet copies to needs a secure context.
+
+**Response headers.** The same values are in `public/_headers`,
+`public/.htaccess` and `deploy/nginx.conf`. For a host that sends no headers,
+the build copies the policy from `_headers` into both pages as a `<meta>`
+(less `frame-ancestors`, which a `<meta>` cannot carry), and the referrer
+policy is a `<meta>` in both as well. The page template itself carries no
+policy, because `npm run web` serves it too, and the dev server's reloading
+needs a socket the policy refuses. `src/__tests__/website.test.ts` fails when
+any two copies differ, and `npm run test:e2e` plays the game under them in
+Chromium:
+
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), xr-spatial-tracking=()
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: same-origin
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+
+Only the site's own script runs, and no script from a string: no inline
+script, no eval, and Trusted Types refuse HTML built from a string.
+`'unsafe-inline'` is in `style-src` alone, because react-native-web and
+expo-font write `<style>` elements while the app runs; without it the board
+draws unstyled and the icons are blank. `connect-src 'none'` holds the "no
+network code" promise in the browser: a request the app tried to make would be
+refused and reported. `frame-ancestors 'none'` and `X-Frame-Options` keep the
+game out of other sites' frames. `no-referrer`, because a page address can
+carry a challenge code. The bundle and the font carry a content hash in their
+names and are cached for a year (`immutable`); everything else is `no-cache`,
+revalidated on every load, so a deploy never mixes an old page with a new
+bundle.
+
+**GitHub Pages sends no headers.** There the `<meta>` policy applies, but
+`frame-ancestors` (which a `<meta>` cannot carry), `X-Frame-Options`, HSTS,
+`Permissions-Policy`, the two cross-origin policies, `nosniff` and the cache
+rules need a host that sends headers: Netlify, Cloudflare Pages, Apache or
+nginx. Pages' branch builds also run Jekyll, which leaves out folders whose
+names start with an underscore, `_expo/` among them, so publish there with
+GitHub Actions (`actions/upload-pages-artifact`), which serves the folder as it
+is. And every project site of an account shares one origin,
+`<user>.github.io`: the web build keeps the games, settings and progress in
+that origin's `localStorage`, under keys that start `sudokuoku:`, where any
+other app published on the origin can read and overwrite them. Give the site a
+domain or subdomain of its own, which gives it an origin of its own.
+
+**Not found.** `404.html` is what a wrong address shows, in the Classic look
+and with no script; Netlify, Cloudflare Pages and GitHub Pages pick it up by
+themselves and the Apache and nginx configs wire it in, also for a folder with
+no page of its own. Both configs refuse dotfiles (`.well-known/` excepted), the
+hosting files and Expo's `metadata.json`, and `_redirects` does the same on
+Netlify; the build leaves `metadata.json` out anyway, since the page never
+reads it.
+
+**When something fails.** `guard.js` loads before the bundle and depends on
+nothing: when the bundle does not arrive, throws as it starts or draws nothing
+within a few seconds, the visitor reads that Sudokuoku could not start and how
+to reload, and with JavaScript off a `<noscript>` note says why nothing
+happens. The browser cannot vibrate, so the Vibration switch is disabled on the
+web with a note saying so; a browser with no share sheet shows the challenge or
+result text in a dialog instead; and a `sudokuoku://` challenge link opens the
+app, not the site, which is why the invitation carries the bare code to paste
+into the challenge sheet.
+
+**Security contact.** `.well-known/security.txt` points at this repository's
+issues and `SECURITY.md`. Its `Expires` date (7 October 2027) is at most a year
+ahead, as RFC 9116 asks, and the unit suite fails once it has passed.
+
+**Launch checklist**, with `SITE` the site's https address:
+
+```sh
+curl -sI http://SITE/ | head -1                    # a 301 to https
+curl -sI https://SITE/ | grep -i -E 'content-security|strict-transport|nosniff|frame-options|referrer|permissions|cache-control'
+curl -sI https://SITE/.git/HEAD | head -1          # 404
+curl -sI https://SITE/_headers | head -1           # 404
+curl -s  https://SITE/_expo/ | grep -c 'Page not found'   # 1: the 404 page, not a listing
+curl -sI https://SITE/.well-known/security.txt | head -1  # 200
+```
+
+Then open the site, play a move, open every sheet, and check that the browser
+console shows no `Content Security Policy` line.
 
 ## Challenge a friend
 
@@ -71,10 +187,21 @@ npm run typecheck         # tsc --noEmit
 npm test                  # vitest: generator, solver, every shift, phantoms, the game reducer
 npm run test:conventions  # the shared repository conventions (CONVENTIONS.md)
 npm run check             # all of the above: the gate before a push
+npm run test:e2e          # the website: built for /sudokuoku/, served with its own headers, played in Chromium
+npm run test:all          # npm test, then npm run test:e2e
 ```
 
-GitHub Actions runs the same checks plus an Android and web Metro bundle on
-every push (`.github/workflows/ci.yml`); a separate job runs
+`npm run test:e2e` builds the website for a sub-path and serves it the way a
+host would, sending the headers exactly as `public/_headers` writes them, then
+plays the game in Chromium (Playwright): the first-run help, a move and its
+shift, a reload that restores the game, the settings and their confirmation, a
+challenge sent, copied and pasted, a board solved to the win sheet, and a new
+game confirmed. It fails on any policy report, uncaught error, console error or
+request outside the site, and then breaks the page on purpose to check the
+safety net, the no-JavaScript note and the 404 page.
+
+GitHub Actions runs the same checks plus an Android and web Metro bundle and
+the end-to-end suite on every push (`.github/workflows/ci.yml`); a separate job runs
 `npm audit --omit=dev --audit-level=high` against the lockfile. `eas.json`
 carries development, preview (Android APK) and production build profiles.
 
@@ -224,4 +351,11 @@ src/components/*            number pad, controls, shift banner, sheets
 src/screens/GameScreen.tsx  wires the reducer, timer, persistence, profile, free/daily switching and sheets
 src/storage.ts              AsyncStorage save/load for both games, the profile and flags
 src/theme.tsx               colour packs, ThemeProvider, useStyles
+public/                     the website's own files, copied into the build: index.html (the
+                            page template), guard.js, 404.html, robots.txt, .well-known/,
+                            and the hosting files _headers, _redirects and .htaccess
+deploy/nginx.conf           the same hosting rules for nginx
+scripts/build-web.mjs       npm run build:web: the export, plus the base path for public/'s pages
+app.config.js               WEB_BASE_PATH for a sub-path build; otherwise app.json as it is
+e2e/                        the website suite (run.mjs) and the host it serves from (serve.mjs)
 ```

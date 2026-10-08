@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <!-- npm run build:web adds the Content-Security-Policy <meta> here, from _headers (less
+         frame-ancestors, which a <meta> cannot carry), for a host that sends no headers. It is not
+         in this template because `npm run web` serves the template too, and the dev server's
+         reloading needs a socket and its error overlay HTML from strings, which the policy refuses. -->
+    <meta name="referrer" content="no-referrer" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta name="description" content="Sudoku that shifts under you after every move, and stays solvable." />
+    <meta name="theme-color" content="#f5f0e6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#19232d" media="(prefers-color-scheme: dark)" />
+    <title>%WEB_TITLE%</title>
+    <!-- The react-native-web style reset (https://necolas.github.io/react-native-web/docs/setup/#root-element),
+         the Classic pack's page colour so nothing flashes white before the app draws, and the notes. -->
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #f5f0e6;
+        color: #24333e;
+      }
+      body {
+        overflow: hidden;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+      .startup-note {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        right: 16px;
+        max-width: 32rem;
+        margin: 0 auto;
+        padding: 16px 20px;
+        border-radius: 12px;
+        background: #fffaf0;
+        color: #24333e;
+        border: 1px solid #b7b2a4;
+        line-height: 1.45;
+      }
+      .startup-note[hidden] {
+        display: none;
+      }
+      .startup-note a {
+        color: #296f69;
+        font-weight: 600;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background: #19232d;
+          color: #f7f1e5;
+        }
+        .startup-note {
+          background: #24323e;
+          color: #f7f1e5;
+          border-color: #526674;
+        }
+        .startup-note a {
+          color: #88c9c0;
+        }
+      }
+    </style>
+    <script src="/guard.js"></script>
+  </head>
+
+  <body>
+    <noscript>
+      <div class="startup-note" role="alert">
+        <strong>Sudokuoku needs JavaScript.</strong> The puzzle is generated and played in your
+        browser, and nothing you do is sent anywhere. Turn JavaScript on for this site, then reload
+        the page.
+      </div>
+    </noscript>
+    <div id="startup-failed" class="startup-note" role="alert" hidden>
+      <strong>Sudokuoku could not start.</strong> Part of the page did not load or would not run in
+      this browser. <a href="">Reload the page</a> to try again; if this keeps happening, use a
+      current version of Safari, Chrome, Edge or Firefox.
+    </div>
+    <div id="root"></div>
+  </body>
+</html>

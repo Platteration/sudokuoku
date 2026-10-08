@@ -1,0 +1,57 @@
+# Response headers for Netlify and Cloudflare Pages, which read this file from the published
+# folder (npm run build:web copies it there from public/). Apache reads .htaccess beside it;
+# nginx takes deploy/nginx.conf from the repository. The values are the same in all three and
+# in the README (src/__tests__/website.test.ts fails when they differ), and the build copies the
+# policy from here into index.html and 404.html as a <meta>, less frame-ancestors, which a
+# <meta> cannot carry.
+#
+# Every value was measured in Chromium with this policy sent as a header (npm run test:e2e).
+# style-src carries 'unsafe-inline' because the framework writes <style> elements while it
+# runs: react-native-web's stylesheet, expo-font's @font-face for the icon font, and the reset
+# in index.html. Without it the board draws unstyled and every icon is blank. Nothing else is
+# inline: no script, no event handler, no eval, and Trusted Types refuse any HTML from a string.
+# connect-src is 'none' because the app has no network code. clipboard-read and clipboard-write
+# are the challenge sheet's Copy and Paste; web-share (the result card) is left at its default,
+# this origin, because Chromium on Linux does not know the name and says so in the console.
+
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), xr-spatial-tracking=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# The bundle and the assets carry a content hash in their names, so a name never changes
+# content: a year, immutable.
+/_expo/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Everything else keeps its name from build to build and is revalidated on every load (an
+# unchanged file costs a 304). These are listed by name rather than under /*, because both
+# hosts join the values of a header that two matching rules set.
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/404.html
+  Cache-Control: no-cache
+
+/guard.js
+  Cache-Control: no-cache
+
+/favicon.ico
+  Cache-Control: no-cache
+
+/robots.txt
+  Cache-Control: no-cache
+
+/.well-known/security.txt
+  Cache-Control: no-cache

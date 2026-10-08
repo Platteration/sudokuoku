@@ -74,27 +74,38 @@ const openSource = () => {
   Linking.openURL(SOURCE_URL).catch(() => undefined);
 };
 
-function Row({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+/**
+ * Vibration is expo-haptics, which does nothing in a browser (`src/haptics.ts`
+ * returns early on the web). There the row says so and its switch is
+ * disabled, rather than being a switch that changes nothing.
+ */
+const HAPTICS_HERE = Platform.OS !== 'web';
+
+function Row({ label, hint, value, onChange, disabled = false }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   const styles = useStyles(makeStyles);
   const { colors } = useTheme();
   return (
     <Press
       onPress={() => onChange(!value)}
+      disabled={disabled}
       scaleTo={0.985}
       accessibilityRole="switch"
       accessibilityLabel={label}
-      accessibilityState={{ checked: value }}
+      accessibilityState={{ checked: value, disabled }}
       // The web build reads none of that state (react-native-web maps no
       // accessibilityState), so the switch says on or off through aria too.
       aria-checked={value}
+      aria-disabled={disabled}
       style={[styles.row, value && styles.rowOn]}
     >
-      <View style={{ flex: 1 }}>
+      {/* The gap keeps a long hint clear of the switch, whose thumb, off, overhangs its track on the web. */}
+      <View style={{ flex: 1, marginRight: 10 }}>
         <Text style={styles.rowLabel}>{label}</Text>
         {hint ? <Text style={styles.rowHint}>{hint}</Text> : null}
       </View>
       <Switch
         value={value}
+        disabled={disabled}
         onValueChange={onChange}
         trackColor={{ true: colors.primary, false: colors.line }}
         thumbColor={colors.surface}
@@ -378,8 +389,13 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
       <Text style={styles.section}>Feedback</Text>
       <Row
         label="Vibration"
-        hint="A tap when you select a cell, a nudge when the board shifts, a buzz when you win."
-        value={settings.haptics}
+        hint={
+          HAPTICS_HERE
+            ? 'A tap when you select a cell, a nudge when the board shifts, a buzz when you win.'
+            : 'Browsers cannot vibrate here. Vibration is in the iOS and Android apps.'
+        }
+        value={HAPTICS_HERE && settings.haptics}
+        disabled={!HAPTICS_HERE}
         onChange={(v) => onChange({ haptics: v })}
       />
 
