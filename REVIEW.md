@@ -22,6 +22,8 @@ Repository hardening applied here as well: every GitHub Action is pinned to a co
 
 Default branch (2026-09-23): `claude/dynamic-shifting-sudoku-neru9v`, not `claude/repo-review-security-baiyud`, the branch this work was done on, so neither Dependabot's security updates nor CI's weekly run reach this work until `main` is created from it and made the default (shared items 4 and 10).
 
+Dependency audit (2026-10-08): the advisories published since 2026-09-23 that have a fix within the ranges Expo declares were taken in the lockfile (brace-expansion 5.0.12, compression 1.8.2, shell-quote 1.12.0, source-map-js 1.2.2). `audit` stays red, on every commit of every branch, on two high advisories that no release fixes: braces up to 3.0.3, the newest (GHSA-vfj7-8cjw-p6xm), which Metro's file map reaches through micromatch, and node-forge up to 1.4.0, the newest (GHSA-86w9-cpqp-85rv), which `@expo/cli` and its code-signing certificates depend on. Both are Expo's build tooling, the newest SDK 57 release still depends on both, and npm's only offer is a downgrade to expo 44. The audit job's form is shared (`CONVENTIONS.md`), so how a repository carries an advisory nothing can fix is a question for the shared conventions.
+
 The rest of this document is the review as written. Fixed items are left in place so the reasoning behind each change stays with it.
 
 ## Summary
