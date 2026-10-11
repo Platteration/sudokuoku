@@ -461,7 +461,7 @@ function GameView({
 
   // A tapped challenge link, whether it cold-started the app or arrived while
   // it was already open. The code is the last path segment of either
-  // sudokuoku://c/<code> or https://<host>/c/<code>.
+  // sudokuoku://c/<code> or https://<host>/<path>#/c/<code>.
   const openChallengeRef = useRef(openChallenge);
   openChallengeRef.current = openChallenge;
 
