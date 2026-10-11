@@ -20,13 +20,17 @@ npm run web        # browser preview
 ```
 
 Store builds use [EAS Build](https://docs.expo.dev/build/introduction/):
-`npx eas build --platform ios` / `--platform android`. Bundle identifiers are
+`npx eas-cli build --platform ios` / `--platform android`. Bundle identifiers are
 set in `app.json`.
 
 ## Challenge a friend
 
 Any board can be handed to someone else as a short code or a link. There is no
 server involved: the whole challenge travels inside the string.
+
+Web invitations use the current app's host and path with a `#/c/<code>` hash,
+so they open from a static host such as GitHub Pages. Native invitations use
+`sudokuoku://c/<code>` for an installed app. Both include a plain code to paste.
 
 This works because the game is deterministic in a particular way. The puzzle is
 `generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
@@ -66,6 +70,8 @@ contrast pack and a reduce motion switch are in Settings.
 npm run typecheck  # tsc --noEmit
 npm test           # vitest: generator, solver, every shift, phantoms, the game reducer
 npm run check      # both
+python e2e/challenge-link.py http://localhost:8081/  # with a web server running;
+                                                  # requires Python Playwright + Chromium
 ```
 
 GitHub Actions runs the same checks plus an Android and web Metro bundle on

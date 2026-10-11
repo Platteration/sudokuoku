@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   Challenge,
   GameState,
@@ -27,7 +27,12 @@ interface Props {
 
 /** Builds the link and the plain code for a challenge. */
 export function challengeLink(code: string): string {
-  return `https://sudokuoku.app/c/${code}`;
+  const encoded = encodeURIComponent(code);
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    // A hash preserves the static host's app path; no /c/ server route is needed.
+    return `${window.location.origin}${window.location.pathname}#/c/${encoded}`;
+  }
+  return `sudokuoku://c/${encoded}`;
 }
 
 function inviteText(code: string, withGhost: boolean): string {
