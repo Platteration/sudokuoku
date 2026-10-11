@@ -17,6 +17,6 @@ The app identifiers are `com.platteration.sudokuoku` on iOS and Android. Confirm
 
 ## Sudokuoku checks
 
-Verify shift animations, phantom fading, reduce motion, challenge links and ghost racing. Web invitations retain the app host and repository path with a challenge hash; native invitations use sudokuoku://c/ for an installed app. Verify native scheme handling and cold-start challenge recovery on devices.
+Verify shift animations, phantom fading, reduce motion, challenge links and ghost racing. Web invitations retain the app host and repository path with a challenge hash, which leaves the address bar once the challenge has opened; native invitations use sudokuoku://c/ for an installed app. Verify native scheme handling and cold-start challenge recovery on devices: a relaunch mid-challenge returns to that challenge, and tapping its link again resumes it rather than restarting it. On the web, `e2e/challenge-link.py` covers the reload and reopen cases against an export.
 
 No real purchase, native device test, signed EAS build or store submission was performed by this cloud preparation.
