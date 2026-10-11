@@ -20,7 +20,7 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3",
-    "vitest": "^3.2.7"
+    "vitest": "^5.0.3"
   },
   "scripts": {
     "start": "expo start",
@@ -33,5 +33,10 @@
     "check": "npm run typecheck && npm run test"
   },
   "private": true,
-  "description": "Sudoku that shifts under you after every move, and stays solvable."
+  "description": "Sudoku that shifts under you after every move, and stays solvable.",
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  }
 }

@@ -66,13 +66,16 @@ import {
   loadDailyGame,
   loadGame,
   loadProfile,
+  loadScreen,
   markHelpSeen,
   saveChallengeCode,
   saveChallengeGame,
   saveDailyGame,
   saveGame,
   saveProfile,
+  saveScreen,
 } from '../storage';
+import { challengeCodeFromUrl, clearChallengeLinkFromUrl, decideChallengeLink } from '../app/links';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
 import { describeShift } from '../utils/describe';
 import { formatTime } from '../utils/time';
@@ -82,8 +85,15 @@ interface Loaded {
   daily: GameState | null;
   challenge: GameState | null;
   challengeInfo: Challenge | null;
+  /** The game shown first: the challenge that was on screen when the app was left, else free play. */
+  screen: 'free' | 'challenge';
   profile: Profile;
   firstLaunch: boolean;
+}
+
+/** The game that takes the screen at launch. */
+function firstGame(initial: Loaded): GameState {
+  return initial.screen === 'challenge' && initial.challenge ? initial.challenge : initial.free;
 }
 
 /** Settings that follow the player across free and daily games. */
@@ -128,8 +138,9 @@ export default function GameScreen() {
       hasSeenHelp(),
       loadChallengeGame(),
       loadChallengeCode(),
+      loadScreen(),
     ]).then(
-      ([savedFree, savedDaily, loadedProfile, seenHelp, savedChallenge, challengeCode]) => {
+      ([savedFree, savedDaily, loadedProfile, seenHelp, savedChallenge, challengeCode, screen]) => {
         if (cancelled) return;
         // Grant the monthly freeze and spend one if a missed day can be saved.
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
@@ -142,6 +153,8 @@ export default function GameScreen() {
           free = newGame(settings);
           profile = recordGameStart(profile, free.settings.difficulty);
           saveProfile(profile);
+          // Saved here rather than by the screen, which a challenge may take first.
+          saveGame(free);
         }
         // A daily from another day, or one already finished, is discarded.
         const today = dateKey(new Date());
@@ -152,7 +165,9 @@ export default function GameScreen() {
           clearDailyGame();
         }
         // An unfinished challenge is resumed, along with the code it came
-        // from so the opponent's ghost is still there.
+        // from so the opponent's ghost is still there. It takes the screen
+        // again if it was there when the app was left: the sheet only ever
+        // starts a new one, so parking it would put it out of reach.
         let challenge: GameState | null = null;
         let challengeInfo: Challenge | null = null;
         if (savedChallenge && savedChallenge.status === 'playing') {
@@ -162,7 +177,15 @@ export default function GameScreen() {
         } else if (savedChallenge) {
           clearChallengeGame();
         }
-        setLoaded({ free, daily, challenge, challengeInfo, profile, firstLaunch: !seenHelp });
+        setLoaded({
+          free,
+          daily,
+          challenge,
+          challengeInfo,
+          screen: challenge && screen === 'challenge' ? 'challenge' : 'free',
+          profile,
+          firstLaunch: !seenHelp,
+        });
       },
     );
     return () => {
@@ -193,7 +216,7 @@ function Loading() {
 }
 
 function Game({ initial }: { initial: Loaded }) {
-  const [state, dispatch] = useReducer(reduce, initial.free);
+  const [state, dispatch] = useReducer(reduce, firstGame(initial));
   return (
     <ThemeProvider preference={state.settings.theme} pack={state.settings.themePack}>
       <GameView state={state} dispatch={dispatch} initial={initial} />
@@ -224,12 +247,11 @@ function GameView({
   const [showDaily, setShowDaily] = useState(false);
   const [showChallenge, setShowChallenge] = useState(false);
 
-  const MAX_CODE_LENGTH = 16384;
-
   /** The games that are not on screen, one slot per mode. */
   const parked = useRef<Partial<Record<GameMode, GameState>>>({
+    free: initial.screen === 'challenge' ? initial.free : undefined,
     daily: initial.daily ?? undefined,
-    challenge: initial.challenge ?? undefined,
+    challenge: initial.screen === 'challenge' ? undefined : initial.challenge ?? undefined,
   });
   const [challengeInfo, setChallengeInfo] = useState<Challenge | null>(initial.challengeInfo);
 
@@ -288,6 +310,10 @@ function GameView({
     if (state.elapsed > 0 && state.elapsed % 10 === 0) persist(state);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.elapsed]);
+  // Remembered so a relaunch brings a challenge back on screen (see the boot).
+  useEffect(() => {
+    saveScreen(state.mode);
+  }, [state.mode]);
 
   // Feedback when a shift lands. The board rearranging is invisible to a
   // screen reader, so it is spoken as well as felt.
@@ -321,7 +347,9 @@ function GameView({
   }, [state.phantomCount]);
 
   // A win: fold it into the profile once per game.
-  const wonSeed = useRef<number | null>(initial.free.status === 'won' ? initial.free.seed : null);
+  const wonSeed = useRef<number | null>(
+    firstGame(initial).status === 'won' ? firstGame(initial).seed : null,
+  );
   useEffect(() => {
     if (state.status !== 'won' || wonSeed.current === state.seed) return;
     wonSeed.current = state.seed;
@@ -460,37 +488,42 @@ function GameView({
   };
 
   // A tapped challenge link, whether it cold-started the app or arrived while
-  // it was already open. The code is the last path segment of either
-  // sudokuoku://c/<code> or https://<host>/c/<code>.
-  const openChallengeRef = useRef(openChallenge);
-  openChallengeRef.current = openChallenge;
-
-  const getChallengeCode = (url: string): string | null => {
-    const match = /\/c\/([^/?#]+)/.exec(url);
-    if (!match) return null;
-    const rawCode = match[1];
-    if (!rawCode || rawCode.length > MAX_CODE_LENGTH) return null;
-    try {
-      const decoded = decodeURIComponent(rawCode);
-      return decoded.length <= MAX_CODE_LENGTH ? decoded : null;
-    } catch {
-      return rawCode.length <= MAX_CODE_LENGTH ? rawCode : null;
-    }
+  // it was already open: sudokuoku://c/<code> or https://<host>/<path>#/c/<code>.
+  // A code is acted on at most once per attempt. The challenge already held for
+  // it is resumed (or, once finished, left on screen) rather than started again,
+  // and a code this session has consumed never starts a second board, so a page
+  // reload or a repeated delivery cannot replace the saved game with a fresh one.
+  const consumedLinks = useRef(new Set<string>());
+  const acceptChallengeLink = (challenge: Challenge) => {
+    const code = encodeChallenge(challenge);
+    const held = state.mode === 'challenge' ? state : parked.current.challenge;
+    const attempt =
+      held && challengeInfo ? { code: encodeChallenge(challengeInfo), status: held.status } : null;
+    const decision = decideChallengeLink(code, attempt, consumedLinks.current.has(code));
+    consumedLinks.current.add(code);
+    if (decision === 'start') openChallenge(challenge);
+    else if (decision === 'resume') switchTo('challenge');
+    // 'finished': that attempt is already on screen. 'ignore': consumed earlier.
   };
+  const acceptChallengeLinkRef = useRef(acceptChallengeLink);
+  acceptChallengeLinkRef.current = acceptChallengeLink;
 
   useEffect(() => {
     let cancelled = false;
 
     const handle = (url: string | null) => {
       if (!url || cancelled) return;
-      const code = getChallengeCode(url);
+      const code = challengeCodeFromUrl(url);
       if (!code) return;
       const result = decodeChallenge(code);
       if (result.ok) {
-        openChallengeRef.current(result.challenge);
+        acceptChallengeLinkRef.current(result.challenge);
       } else {
         Alert.alert('That challenge could not be opened', result.error);
       }
+      // On the web the hash has done its job; dropping it keeps a reload from
+      // delivering the same link again.
+      clearChallengeLinkFromUrl();
     };
 
     Linking.getInitialURL().then(handle);

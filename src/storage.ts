@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CELLS, DEFAULT_SETTINGS, GameState, Profile, normalizeProfile } from './engine';
+import { CELLS, DEFAULT_SETTINGS, GameMode, GameState, Profile, normalizeProfile } from './engine';
 
 const FREE_GAME_KEY = 'sudokuoku:game:v1';
 const DAILY_GAME_KEY = 'sudokuoku:daily:v1';
@@ -8,6 +8,7 @@ const CHALLENGE_CODE_KEY = 'sudokuoku:challengeCode:v1';
 const PROFILE_KEY = 'sudokuoku:profile:v1';
 const LEGACY_STATS_KEY = 'sudokuoku:stats:v1';
 const HELP_SEEN_KEY = 'sudokuoku:helpSeen:v1';
+const SCREEN_KEY = 'sudokuoku:screen:v1';
 
 function safeParse<T>(text: string): T {
   return JSON.parse(text, (key, value) => {
@@ -107,6 +108,28 @@ export async function saveChallengeCode(code: string): Promise<void> {
 export async function loadChallengeCode(): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(CHALLENGE_CODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which game was on screen when the app was last used. A relaunch puts a
+ * challenge back on screen from this; the sheet only ever starts a new one, so
+ * a parked challenge would otherwise be out of reach.
+ */
+export async function saveScreen(mode: GameMode): Promise<void> {
+  try {
+    await AsyncStorage.setItem(SCREEN_KEY, mode);
+  } catch {
+    // best-effort
+  }
+}
+
+export async function loadScreen(): Promise<GameMode | null> {
+  try {
+    const mode = await AsyncStorage.getItem(SCREEN_KEY);
+    return mode === 'free' || mode === 'daily' || mode === 'challenge' ? mode : null;
   } catch {
     return null;
   }
