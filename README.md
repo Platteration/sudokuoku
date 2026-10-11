@@ -32,12 +32,13 @@ Web invitations use the current app's host and path with a `#/c/<code>` hash,
 so they open from a static host such as GitHub Pages. Native invitations use
 `sudokuoku://c/<code>` for an installed app. Both include a plain code to paste.
 
-A link is acted on once per attempt. Opening it starts the challenge and, on the
-web, drops the hash from the address bar, so reloading the page brings the
-half-played challenge back as it was instead of starting it again. Opening the
-same link later resumes the attempt saved for that code (or leaves a finished one
-on screen); only a different code starts a new board. The challenge that was on
-screen when the app was left is the one shown at the next launch.
+Opening a link starts the challenge and, on the web, drops the hash from the
+address bar, so reloading the page brings the half-played challenge back as it
+was instead of starting it again. While an attempt for that code is still saved,
+opening the same link resumes it (or leaves a finished one on screen) rather than
+restarting it; once the attempt is gone, the link starts a fresh one. Pasting a
+code into the Challenge sheet always starts a new attempt. The challenge that was
+on screen when the app was left is the one shown at the next launch.
 
 This works because the game is deterministic in a particular way. The puzzle is
 `generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
