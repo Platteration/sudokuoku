@@ -364,4 +364,16 @@ describe('receiving a challenge over the one in progress', () => {
   it('replaces a challenge nobody has made a move in yet without asking', () => {
     expect(receiveChallenge(playing(sample(), 0), sample(), other)).toBe('start');
   });
+
+  it('leaves the challenge just won on screen when its own link arrives again', () => {
+    // A challenge is a single attempt: the same link does not start a second one.
+    const won = { ...playing(sample(), 3), status: 'won' as const };
+    expect(receiveChallenge(won, sample(), sample())).toBe('finished');
+    const again = decodeChallenge(encodeChallenge(sample()));
+    if (!again.ok) throw new Error(again.error);
+    expect(receiveChallenge(won, sample(), again.challenge)).toBe('finished');
+    // A different challenge, or one whose code could not be read back, starts.
+    expect(receiveChallenge(won, sample(), other)).toBe('start');
+    expect(receiveChallenge(won, null, sample())).toBe('start');
+  });
 });

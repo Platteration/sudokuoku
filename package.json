@@ -27,7 +27,7 @@
     "globals": "^16.0.0",
     "playwright": "^1.56.1",
     "typescript": "~6.0.3",
-    "vitest": "^3.2.7"
+    "vitest": "^5.0.3"
   },
   "scripts": {
     "start": "expo start",
@@ -49,5 +49,10 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  }
 }

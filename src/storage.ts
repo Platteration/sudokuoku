@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GameState, Profile, normalizeProfile } from './engine';
+import { GameMode, GameState, Profile, normalizeProfile } from './engine';
 import {
   GameSlot,
   SharedRecord,
@@ -23,6 +23,7 @@ export const KEYS = {
   settings: 'sudokuoku:settings:v1',
   challenge: 'sudokuoku:challenge:v1',
   challengeCode: 'sudokuoku:challengeCode:v1',
+  screen: 'sudokuoku:screen:v1',
 } as const;
 
 /** Records older builds wrote, read once and folded into the ones above. */
@@ -95,6 +96,29 @@ export async function saveChallengeCode(code: string): Promise<void> {
 export async function loadChallengeCode(): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(KEYS.challengeCode);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which game was on screen when the app was last used. A relaunch puts a
+ * challenge back on screen from this: the sheet only ever starts a new one,
+ * and its link, the one other way back to a parked challenge, may be gone. The
+ * value is compared with the three modes and anything else reads as none.
+ */
+export async function saveScreen(mode: GameMode): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.screen, mode);
+  } catch {
+    // best-effort
+  }
+}
+
+export async function loadScreen(): Promise<GameMode | null> {
+  try {
+    const mode = await AsyncStorage.getItem(KEYS.screen);
+    return mode === 'free' || mode === 'daily' || mode === 'challenge' ? mode : null;
   } catch {
     return null;
   }

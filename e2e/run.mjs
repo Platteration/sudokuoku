@@ -6,11 +6,12 @@
  * Content-Security-Policy, Trusted Types or Permissions-Policy report, any uncaught error, any
  * console error, and any request outside the site, while it drives the game the way a visitor
  * does: the first-run help, a move and its shift, a reload that restores the game, the settings
- * sheet with its confirmation, a challenge copied and pasted through the clipboard, a board
+ * sheet with its confirmation, a challenge sent, copied and pasted through the clipboard, a board
  * solved to the win sheet and its result shared, and a new game confirmed. It reads back which
- * browser features the page is allowed. It follows challenge links the way a page on another site
- * could write them, posts the page a message, reloads, wins a linked challenge and reloads again,
- * and pastes text far longer than any challenge. It loads the site from a host that sends no
+ * browser features the page is allowed. It follows the invitation the site wrote in another
+ * browser, follows challenge links the way a page on another site could write them, posts the
+ * page a message, reloads, leaves a challenge for a free game and reloads, wins a linked challenge
+ * and reloads again, and pastes text far longer than any challenge. It loads the site from a host that sends no
  * headers, over plain http at a name that is not loopback, and measures which inline styles need
  * style-src's 'unsafe-inline'. Then it breaks the page on purpose to see the safety net
  * (public/guard.js) and the no-JavaScript note, and reads the 404 page.
@@ -305,10 +306,19 @@ try {
   await button(page, 'Send challenge').click();
   await settle(page, 600);
   check('Send challenge shows the invitation where there is no share sheet', seen.dialogs.some((d) => d.startsWith('alert: I set you a Sudokuoku board.')), seen.dialogs.join(' | '));
+  // Sent from the website, the invitation links to the website: this page, at this path, with the
+  // code in the fragment, which a static host answers with the page.
+  const invitation = seen.dialogs.find((d) => d.startsWith('alert: I set you a Sudokuoku board.'))?.slice('alert: '.length) ?? '';
+  const invitationLink = invitation.split('\n').find((line) => /^https?:\/\//.test(line)) ?? '';
+  const invited = /#\/c\/([A-Za-z0-9_-]+)$/.exec(invitationLink)?.[1] ?? '';
+  check('the invitation links to this site, at its path, with the code in the fragment', invited.length >= 12 && invitationLink === `${home}#/c/${invited}`, invitationLink);
+  /** The board the invitation was sent from, as the page stored it. */
+  const sent = await page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:game:v1') ?? 'null')?.seed);
   await button(page, 'Copy code').click();
   await settle(page);
   const code = await page.evaluate(() => navigator.clipboard.readText());
   check('Copy code puts the challenge on the clipboard', /^[A-Za-z0-9_-]{12,}$/.test(code), code);
+  check('and the invitation carries that code twice: in its link, and on its own to paste', invited === code && invitation.trimEnd().endsWith(`\n${code}`), invitation);
   await button(page, 'Paste from clipboard').click();
   await settle(page, 1000);
   check('Paste from clipboard opens that challenge', (await bodyText(page)).includes('Challenge · '));
@@ -347,11 +357,64 @@ try {
   report('the game', seen);
   await context.close();
 
-  // A challenge link. The site writes none (an invitation carries the app's own sudokuoku:// link
-  // and the bare code), but the page reads its own address for one, so anybody can write one: a
+  // That invitation, followed in another browser: the site at the same path, and the challenge on
+  // the board it was sent from. Followed, the link loads the page; one that differed from the page
+  // already open only in its fragment would not.
+  {
+    const seen = fresh();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await open(context, seen);
+    const answer = await page.goto(invitationLink, { waitUntil: 'load' });
+    check('an invitation from the website opens the site', answer?.status() === 200, String(answer?.status()));
+    await page.getByText('How Sudokuoku works').waitFor({ timeout: 15000 });
+    await closeSheet(page, 'How Sudokuoku works');
+    const opened = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:challenge:v1') ?? 'null'));
+    check(
+      'and the challenge it names, on the board it was sent from',
+      (await until(page, async () => (await opened())?.seed === sent)) && (await bodyText(page)).includes('Challenge · ') && (await opened())?.moves === 0,
+      JSON.stringify([sent, (await opened())?.seed])
+    );
+    await button(page, 'Challenge a friend').click();
+    check('the challenge sheet says a challenge is being played', await until(page, async () => (await bodyText(page)).includes('You are playing a challenge')));
+    await closeSheet(page, 'Challenge a friend');
+    // A launch that has to make a new free game while the challenge takes the screen (here the free
+    // game's record is unreadable, as anything on the origin can make it) saves that game as it
+    // makes it: nothing else would, and every later load would make, and count, another.
+    const played = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:profile:v1') ?? 'null')?.totals?.played);
+    /** The stored free game's seed, or 'unreadable' while the record planted below is still there. */
+    const free = () =>
+      page.evaluate(() => {
+        try {
+          return JSON.parse(localStorage.getItem('sudokuoku:game:v1') ?? 'null')?.seed;
+        } catch {
+          return 'unreadable';
+        }
+      });
+    const reload = async () => {
+      await page.reload({ waitUntil: 'load' });
+      await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+      await settle(page, 800);
+    };
+    await page.evaluate(() => localStorage.setItem('sudokuoku:game:v1', '{'));
+    await reload();
+    const counted = await played();
+    const behind = await free();
+    await reload();
+    check(
+      'a free game made behind the challenge is saved as it is made, and the next load counts no game',
+      typeof behind === 'number' && (await free()) === behind && (await played()) === counted && (await bodyText(page)).includes('Challenge · '),
+      JSON.stringify([behind, await free(), counted, await played()])
+    );
+    report('an invitation followed', seen);
+    await context.close();
+  }
+
+  // A challenge link. The site writes them (an invitation sent from it is the page's own address
+  // with #/c/<code>), and the page reads its own address for one, so anybody can write one too: a
   // page on another site can send its visitors to it. Following it again, or reloading, carries
-  // on with the challenge rather than starting it over; a message posted to the window is not a
-  // link; and a different challenge asks before it replaces one with moves in it.
+  // on with the challenge rather than starting it over; leaving it for another game takes its
+  // link out of the address, so a reload shows that game; a message posted to the window is not
+  // a link; and a different challenge asks before it replaces one with moves in it.
   {
     const seen = fresh();
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -377,6 +440,11 @@ try {
     check('two boards, two challenge codes', /^[A-Za-z0-9_-]{12,}$/.test(first) && /^[A-Za-z0-9_-]{12,}$/.test(second) && first !== second, `${first} ${second}`);
     /** The challenge kept in the one challenge slot, as the page stored it. */
     const kept = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:challenge:v1') ?? 'null'));
+    /** How many games the profile has counted as played. */
+    const played = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:profile:v1') ?? 'null')?.totals?.played);
+    /** The board as a screen reader hears it, one label per cell. */
+    const board = () => page.getByRole('button', { name: /^Row \d, column \d, / }).evaluateAll((cells) => cells.map((c) => c.getAttribute('aria-label')));
+    const undoable = async () => (await button(page, 'Undo').getAttribute('aria-disabled')) !== 'true';
     const follow = async (code) => {
       await page.goto(`${home}?/c/${code}`, { waitUntil: 'load' });
       await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
@@ -393,6 +461,8 @@ try {
     }
     const playing = await kept();
     check('two moves are made in it, and kept', playing?.moves === 2 && playing?.mode === 'challenge', JSON.stringify(playing?.moves));
+    const playedBoard = await board();
+    const counted = await played();
 
     await page.evaluate(() => window.postMessage('a message, from anyone', '*'));
     await settle(page, 1000);
@@ -405,11 +475,30 @@ try {
       (await until(page, async () => (await stat(page, 'Moves')) === 2)) && (await bodyText(page)).includes('Challenge · ') && (await kept())?.seed === playing?.seed,
       `${await stat(page, 'Moves')}`
     );
+    check(
+      'on the same board, with its moves still to undo, and no game counted for the reload',
+      JSON.stringify(await board()) === JSON.stringify(playedBoard) && (await undoable()) && (await played()) === counted,
+      JSON.stringify([await undoable(), counted, await played()])
+    );
     await follow(first);
-    check('and so does following the same link again', (await until(page, async () => (await stat(page, 'Moves')) === 2)) && (await kept())?.moves === 2);
-    // Away from the challenge, with its link still in the address: a message is still not a link.
+    check(
+      'and so does following the same link again',
+      (await until(page, async () => (await stat(page, 'Moves')) === 2)) && (await kept())?.moves === 2 && (await played()) === counted
+    );
+    // Left for another game, the challenge keeps its slot and its link leaves the address, so a
+    // reload shows the game on screen rather than taking the visitor back to the challenge.
     await button(page, 'New game').click();
     check('New game leaves the challenge for a free game', await until(page, async () => !(await bodyText(page)).includes('Challenge · ')));
+    check('and takes its link out of the address', await until(page, async () => page.url() === home), page.url());
+    const afterNew = await played();
+    await page.reload({ waitUntil: 'load' });
+    await page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+    await settle(page, 800);
+    check(
+      'a reload then shows the free game, with the challenge kept in its slot and no game counted',
+      !(await bodyText(page)).includes('Challenge · ') && (await kept())?.seed === playing?.seed && (await kept())?.moves === 2 && (await played()) === afterNew,
+      JSON.stringify([(await kept())?.moves, afterNew, await played()])
+    );
     const asked = seen.dialogs.length;
     await page.evaluate(() => window.postMessage('a message, from anyone', '*'));
     await settle(page, 1000);
@@ -425,13 +514,23 @@ try {
     check('a link to another challenge asks before it replaces this one', seen.dialogs.some((d) => d.startsWith('confirm: Start a new challenge?')), seen.dialogs.join(' | '));
     const declined = await kept();
     check('and declined, the challenge in progress is kept', declined?.seed === playing?.seed && declined?.moves === 2, JSON.stringify([declined?.seed, declined?.moves]));
+    // The address still names the declined challenge here. In a browser the 'url' event is every
+    // message posted to the window, reported with that address, so were the page to listen for it
+    // a message would ask again.
+    const declinedAsked = seen.dialogs.length;
+    await page.evaluate(() => window.postMessage('a message, from anyone', '*'));
+    await settle(page, 1000);
+    check(
+      'a message posted to the page does not offer the link in its address again',
+      seen.dialogs.length === declinedAsked && (await kept())?.moves === 2,
+      seen.dialogs.slice(declinedAsked).join(' | ')
+    );
     await follow(second);
     const replaced = await kept();
     check('and accepted, the new challenge starts', (await bodyText(page)).includes('Challenge · ') && replaced?.seed !== playing?.seed && (await stat(page, 'Moves')) === 0);
 
     // Won, the challenge leaves the address: a reload after the win neither puts the visitor back
     // on a fresh copy of the board they finished nor counts another game played.
-    const played = () => page.evaluate(() => JSON.parse(localStorage.getItem('sudokuoku:profile:v1') ?? 'null')?.totals?.played);
     for (let i = 0; i < 81 && (await empties.count()) > 0; i += 1) {
       const moves = await stat(page, 'Moves');
       await empties.first().click();
@@ -470,6 +569,9 @@ try {
       (await kept())?.seed === pasted?.seed && (await played()) === before && seen.dialogs.length === dialogs,
       JSON.stringify([(await kept())?.seed, before, await played(), seen.dialogs.slice(dialogs)])
     );
+    // With no link in the address, the challenge on screen when the page was left is the one it
+    // shows again: nothing else in the app returns to a challenge.
+    check('on screen, as it was when the page was left', await until(page, async () => (await bodyText(page)).includes('Challenge · ')));
     report('challenge links', seen);
     await context.close();
   }

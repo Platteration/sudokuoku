@@ -36,9 +36,11 @@ const {
   clearDailyGame,
   loadDailyGame,
   loadGame,
+  loadScreen,
   loadSharedSettings,
   saveDailyGame,
   saveGame,
+  saveScreen,
   saveSharedSettings,
 } = await import('../storage');
 
@@ -255,5 +257,36 @@ describe('the shared settings record', () => {
     for (const [key, value] of before) expect(store.get(key), key).toBe(value);
     expect(JSON.parse(store.get(SETTINGS_KEY)!)).toEqual({ theme: 'dark', seenIntro: true });
     expect(await loadSharedSettings()).toEqual({ settings: { theme: 'dark' }, seenIntro: true });
+  });
+});
+
+describe('which game was on screen', () => {
+  const SCREEN_KEY = 'sudokuoku:screen:v1';
+
+  it('is written under its own record and read back', async () => {
+    for (const mode of ['free', 'daily', 'challenge'] as const) {
+      await saveScreen(mode);
+      expect(store.get(SCREEN_KEY)).toBe(mode);
+      expect(await loadScreen()).toBe(mode);
+    }
+  });
+
+  it('reads as none when there is no record, or it names no game', async () => {
+    expect(await loadScreen()).toBeNull();
+    // Anything on the origin can write the web build's store.
+    for (const junk of ['', 'Challenge', 'challenge ', '"challenge"', 'constructor', '__proto__', 'toString']) {
+      store.set(SCREEN_KEY, junk);
+      expect(await loadScreen(), junk).toBeNull();
+    }
+  });
+
+  it('is best-effort: a store that refuses or fails neither throws nor invents one', async () => {
+    fault.writes = true;
+    await expect(saveScreen('challenge')).resolves.toBeUndefined();
+    expect(store.has(SCREEN_KEY)).toBe(false);
+    fault.writes = false;
+    store.set(SCREEN_KEY, 'challenge');
+    fault.all = true;
+    await expect(loadScreen()).resolves.toBeNull();
   });
 });

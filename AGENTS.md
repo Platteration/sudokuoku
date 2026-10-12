@@ -153,26 +153,34 @@ SYSTEM_ALERT_WINDOW from the shipped build (VIBRATE, for expo-haptics, is all th
 remains) and `plugins/withDebugInternet.js` (copied
 verbatim from drawdraw) adds INTERNET back to the debug source set alone, which is how a
 dev client still reaches Metro. `allowBackup` is explicitly true because the store is
-the player's own record (three game slots — free, daily and challenge — and a profile), and a restore is untrusted JSON
+the player's own record (three game slots — free, daily and challenge — a profile, and which of them was on screen), and a restore is untrusted JSON
 that `src/utils/saved.ts` already guards. When adding a native module, run `npm test`:
 the manifest walk fails on any permission the module declares that is neither used nor
 blocked. Add its config plugin to app.json's `plugins` by hand: with `app.config.js`
 beside app.json, Expo will not write `plugins` into a dynamic config, so `npx expo install`
 prints "Cannot automatically write to dynamic config at: app.config.js" and adds nothing
 (`website.test.ts` holds Expo to that answer, so the sentence goes when it stops being true). The one URL the app takes in is a challenge link, `sudokuoku://c/<code>`
-(`scheme` in app.json), heard by the game screen alone and read through
-`decodeChallenge`; the invite carries the bare code as well, since not every messenger
-turns a custom scheme into a link. A link is written by whoever sent it, so what one may
-do to the single challenge slot is `receiveChallenge`'s (`src/engine/challenge.ts`): the
-challenge in progress resumes, and a different one replaces a challenge with moves in it
-only after `confirmAction` asks. On the web the page reads a `/c/<code>` in its own
-address once, at load, and does not subscribe to `url`: expo-linking's web `url` event is
-every `message` posted to the window, from any origin, reported with the page's unchanged
-address, so subscribing let any opener, frame or extension restart a challenge. The link
-stays in the address while its challenge is the one in the slot, which is how a reload
-carries on with it, and `history.replaceState` takes it out (`withoutChallengeLink` in
-`src/utils/challengeInput.ts`) once that challenge is won or another takes the slot: left
-there, a reload after the win started the same board over and counted another game.
+(`scheme` in app.json), heard by the game screen alone, parsed by `challengeCodeFromUrl`
+(`src/app/links.ts`) and read through `decodeChallenge`; the invite carries the bare code
+as well, since not every messenger turns a custom scheme into a link. Sent from the
+website, the invite's link is the site's own address with `#/c/<code>` instead
+(`challengeLink` in `src/components/ChallengeSheet.tsx`), which a static host answers with
+the page. A link is written by whoever sent it, so what one may do to the single challenge
+slot is `receiveChallenge`'s (`src/engine/challenge.ts`): the challenge in progress
+resumes, the one just won stays on screen, and a different one replaces a challenge with
+moves in it only after `confirmAction` asks. On the web the page reads a `/c/<code>` in its
+own address (fragment, query or path) once, at load, and does not subscribe to `url`:
+expo-linking's web `url` event is every `message` posted to the window, from any origin,
+reported with the page's unchanged address, so subscribing let any opener, frame or
+extension restart a challenge. The link stays in the address while its challenge is the
+one on screen, which carries a reload on with it even when nothing could be saved, and
+`clearChallengeLinkFromUrl` (`src/app/links.ts`, through `withoutChallengeLink` in
+`src/utils/challengeInput.ts`) takes it out once that challenge is won, another takes the
+slot, or the player leaves it for another game: left there after a win, a reload started
+the same board over and counted another game, and left there after the player moved on, a
+reload took them off the game they were playing. Which game was on screen is its own record,
+`sudokuoku:screen:v1`, so a relaunch puts a challenge left on screen back there; leaving a
+challenge keeps it in its slot, and its link resumes it.
 
 ## Website
 
@@ -189,7 +197,10 @@ build:web`: `app.config.js` turns the variable into `experiments.baseUrl` for th
 otherwise returns `app.json` untouched (the object itself, which `website.test.ts` pins, so no
 native build sees a difference), and `scripts/build-web.mjs` prefixes the site-absolute URLs in
 `public/`'s two pages and Apache's `ErrorDocument` lines, which Expo leaves alone, and removes
-Expo's `metadata.json`, which the page never reads. The host does the under-the-hood work: one
+Expo's `metadata.json`, which the page never reads. `.github/workflows/pages.yml` publishes that
+build to GitHub Pages with `WEB_BASE_PATH=/<repository>` after `npm ci`, the type check and the
+unit tests, on a push to `main` (which does not exist yet) or by hand; its shape is the
+conventions test's. The host does the under-the-hood work: one
 policy, written in `public/_headers` (Netlify, Cloudflare Pages), `public/.htaccess` (Apache),
 `deploy/nginx.conf` (outside the published folder) and the README, and copied by the build from
 `_headers` into both pages' `<meta>`, less `frame-ancestors` (a `<meta>` cannot carry it) and

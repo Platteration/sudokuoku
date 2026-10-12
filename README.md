@@ -25,7 +25,7 @@ npm run build:web  # the website, in dist/ (see Deploy)
 ### Native builds
 
 Store builds use [EAS Build](https://docs.expo.dev/build/introduction/):
-`npx eas build --platform ios` / `--platform android`. Bundle identifiers are
+`npx eas-cli build --platform ios` / `--platform android`. Bundle identifiers are
 set in `app.json`.
 
 ### Deploy
@@ -119,7 +119,11 @@ rules need a host that sends headers: Netlify, Cloudflare Pages, Apache or
 nginx. Pages' branch builds also run Jekyll, which leaves out folders whose
 names start with an underscore, `_expo/` among them, so publish there with
 GitHub Actions (`actions/upload-pages-artifact`), which serves the folder as it
-is. And every project site of an account shares one origin,
+is. `.github/workflows/pages.yml` does that on a push to `main`, or when run by
+hand: it runs the type check and the unit tests, then builds with
+`WEB_BASE_PATH=/<repository>` and deploys `dist/`. It needs Pages enabled with
+GitHub Actions as its source, and GitHub offers the manual run only once the
+file is on the default branch. And every project site of an account shares one origin,
 `<user>.github.io`: the web build keeps the games, settings and progress in
 that origin's `localStorage`, under keys that start `sudokuoku:`, where any
 other app published on the origin can read and overwrite them. Give the site a
@@ -149,9 +153,10 @@ within a few seconds, the visitor reads that Sudokuoku could not start and how
 to reload, and with JavaScript off a `<noscript>` note says why nothing
 happens. The browser cannot vibrate, so the Vibration switch is disabled on the
 web with a note saying so; a browser with no share sheet shows the challenge or
-result text in a dialog instead; and a `sudokuoku://` challenge link opens the
-app, not the site, which is why the invitation carries the bare code to paste
-into the challenge sheet.
+result text in a dialog instead; and a challenge sent from the app carries its
+`sudokuoku://` link, which opens the app and not the site (one sent from the
+site links to the site), so every invitation also carries the bare code to
+paste into the challenge sheet.
 
 **Security contact.** `.well-known/security.txt` points at this repository's
 issues and `SECURITY.md`. Its `Expires` date (7 October 2027) is at most a year
@@ -174,19 +179,28 @@ console shows no `Content Security Policy` line.
 ## Challenge a friend
 
 Any board can be handed to someone else as a short code or a link. There is no
-server involved: the whole challenge travels inside the string. The link is
-`sudokuoku://c/<code>`, which opens the app where it is installed; the invite
-carries the bare code too, for messengers that do not turn that into a link,
-and the challenge sheet takes either one pasted in. The website reads a code in
-its own address the same way (`…/#/c/<code>`).
+server involved: the whole challenge travels inside the string. In the app the
+link is `sudokuoku://c/<code>`, which opens the app where it is installed; on
+the website it is the site's own address with the code in the fragment
+(`https://<host>/<path>/#/c/<code>`), so it opens the same site from a static
+host such as GitHub Pages, path and all. The invite carries the bare code too,
+for messengers that do not turn a link into one, and the challenge sheet takes
+a code or either link pasted in. The website also reads the older
+`…/?/c/<code>` and `…/c/<code>` forms out of its address.
 
 There is one challenge slot, and a link is written by whoever sent it, so
 following one never throws a challenge away: the link of the challenge already
 being played carries on where it was (a reload reads the address again, and a
-phone can hand a link over twice), and a link to a different one replaces a
-challenge with moves in it only after asking. Once the challenge a link named
-is won, or another challenge takes the slot, the website takes the link out of
-its address, so a reload does not start it over.
+phone can hand a link over twice), the link of the challenge just won leaves
+the finished board on screen, and a link to a different one replaces a
+challenge with moves in it only after asking. The website keeps the link in its
+address while its challenge is on screen, and takes it out once that challenge
+is won, another takes the slot, or the player leaves it for another game, so a
+reload shows the game that was on screen and never starts a challenge over.
+Leaving a challenge keeps it in its slot: its link resumes it, and the challenge
+on screen when the app was left is the one shown at the next launch. Pasting a
+code into the challenge sheet is the player's own choice and always starts that
+board.
 
 This works because the game is deterministic in a particular way. The puzzle is
 `generatePuzzle(createRng(seed), difficulty)`, and the shift that fires after
@@ -237,8 +251,10 @@ host would, sending the headers exactly as `public/_headers` writes them, then
 plays the game in Chromium (Playwright): the first-run help, a move and its
 shift, a reload that restores the game, the settings and their confirmation, a
 challenge sent, copied and pasted, a board solved to the win sheet, a new
-game confirmed, challenge links followed, followed again, reloaded, posted a
-message, replaced, won and reloaded, and a paste far longer than any challenge.
+game confirmed, the invitation the site wrote followed in another browser,
+challenge links followed, followed again, reloaded, left for a free game and
+reloaded, posted a message, replaced, won and reloaded, and a paste far longer
+than any challenge.
 It reads back which browser features the page is allowed, loads the site with
 no headers over plain http at a name that is not loopback, and measures which
 inline styles need `'unsafe-inline'`. It fails on any policy report, uncaught

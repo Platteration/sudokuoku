@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   Challenge,
   GameState,
@@ -27,7 +27,11 @@ interface Props {
 }
 
 /**
- * The link for a challenge, in the app's own scheme, which the app opens.
+ * The link for a challenge. In the app it is the app's own scheme, which the
+ * app opens. On the website it is the site's own address with the code in the
+ * fragment, `…/#/c/<code>`: a static host answers only for the page, and the
+ * page reads the code out of its address (see GameScreen), so the recipient
+ * lands on the same site and the same path.
  *
  * It used to be an https link on sudokuoku.app. Nothing in this project
  * serves that name and the app declares no associated domain, so such a link
@@ -35,7 +39,12 @@ interface Props {
  * name. The code printed below the link works everywhere.
  */
 export function challengeLink(code: string): string {
-  return `sudokuoku://c/${code}`;
+  const encoded = encodeURIComponent(code);
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    // The page's path without its query or fragment, which may hold the link it was opened with.
+    return `${window.location.origin}${window.location.pathname}#/c/${encoded}`;
+  }
+  return `sudokuoku://c/${encoded}`;
 }
 
 function inviteText(code: string, withGhost: boolean): string {

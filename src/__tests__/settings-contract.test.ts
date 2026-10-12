@@ -24,6 +24,7 @@ describe('storage keys', () => {
       settings: 'sudokuoku:settings:v1',
       challenge: 'sudokuoku:challenge:v1',
       challengeCode: 'sudokuoku:challengeCode:v1',
+      screen: 'sudokuoku:screen:v1',
     });
     expect(LEGACY_KEYS).toEqual({
       stats: 'sudokuoku:stats:v1',

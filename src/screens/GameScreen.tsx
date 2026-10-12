@@ -68,19 +68,21 @@ import {
   loadDailyGame,
   loadGame,
   loadProfile,
+  loadScreen,
   loadSharedSettings,
   saveChallengeCode,
   saveChallengeGame,
   saveDailyGame,
   saveGame,
   saveProfile,
+  saveScreen,
   saveSharedSettings,
 } from '../storage';
+import { challengeCodeFromUrl, clearChallengeLinkFromUrl } from '../app/links';
 import { confirmAction, notify } from '../confirm';
 import { haptic, setHapticsEnabled } from '../haptics';
 import { useReduceMotion } from '../motion';
 import { Colors, ThemeProvider, radius, useStyles, useTheme } from '../theme';
-import { CHALLENGE_LINK, withoutChallengeLink } from '../utils/challengeInput';
 import { describeShift } from '../utils/describe';
 import { applyShared, pickShared } from '../utils/saved';
 import { formatTime } from '../utils/time';
@@ -90,6 +92,8 @@ interface Loaded {
   daily: GameState | null;
   challenge: GameState | null;
   challengeInfo: Challenge | null;
+  /** The game shown first: the challenge that was on screen when the app was left, else free play. */
+  screen: 'free' | 'challenge';
   profile: Profile;
   /**
    * Whether the introduction has been read; it opens by itself until it has.
@@ -97,6 +101,11 @@ interface Loaded {
    * and nothing about it is written until the player closes it.
    */
   seenIntro: boolean | null;
+}
+
+/** The game that takes the screen at launch. */
+function firstGame(initial: Loaded): GameState {
+  return initial.screen === 'challenge' && initial.challenge ? initial.challenge : initial.free;
 }
 
 export default function GameScreen() {
@@ -111,13 +120,15 @@ export default function GameScreen() {
       loadSharedSettings(),
       loadChallengeGame(),
       loadChallengeCode(),
+      loadScreen(),
     ]).then(
-      ([savedFree, savedDaily, loadedProfile, shared, savedChallenge, challengeCode]) => {
+      ([savedFree, savedDaily, loadedProfile, shared, savedChallenge, challengeCode, screen]) => {
         if (cancelled) return;
         // Grant the monthly freeze and spend one if a missed day can be saved.
         let profile = refreshStreak(loadedProfile, dateKey(new Date()));
         if (profile !== loadedProfile) saveProfile(profile);
         let free: GameState;
+        let freshFree = false;
         // Only the daily slot is tested for staleness below, so the free slot
         // must not be able to hold a daily: readSavedGame takes the kind of
         // game from the slot it was read out of rather than from the save.
@@ -126,6 +137,7 @@ export default function GameScreen() {
         } else {
           const settings = { ...DEFAULT_SETTINGS, ...(savedFree?.settings ?? {}) };
           free = newGame(settings);
+          freshFree = true;
           profile = recordGameStart(profile, free.settings.difficulty);
           saveProfile(profile);
         }
@@ -138,7 +150,9 @@ export default function GameScreen() {
           clearDailyGame();
         }
         // An unfinished challenge is resumed, along with the code it came
-        // from so the opponent's ghost is still there.
+        // from so the opponent's ghost is still there. It takes the screen
+        // again if it was there when the app was left: the sheet only ever
+        // starts a new one, so parking it could put it out of reach.
         let challenge: GameState | null = null;
         let challengeInfo: Challenge | null = null;
         if (savedChallenge && savedChallenge.status === 'playing') {
@@ -153,7 +167,18 @@ export default function GameScreen() {
         free = { ...free, settings: applyShared(free.settings, shared.settings) };
         if (daily) daily = { ...daily, settings: applyShared(daily.settings, shared.settings) };
         if (challenge) challenge = { ...challenge, settings: applyShared(challenge.settings, shared.settings) };
-        setLoaded({ free, daily, challenge, challengeInfo, profile, seenIntro: shared.seenIntro });
+        // Saved here rather than by the screen, which a challenge may take
+        // first: unsaved, the next launch would make, and count, another.
+        if (freshFree) saveGame(free);
+        setLoaded({
+          free,
+          daily,
+          challenge,
+          challengeInfo,
+          screen: challenge && screen === 'challenge' ? 'challenge' : 'free',
+          profile,
+          seenIntro: shared.seenIntro,
+        });
       },
     );
     return () => {
@@ -184,7 +209,7 @@ function Loading() {
 }
 
 function Game({ initial }: { initial: Loaded }) {
-  const [state, dispatch] = useReducer(reduce, initial.free);
+  const [state, dispatch] = useReducer(reduce, firstGame(initial));
   return (
     <ThemeProvider preference={state.settings.theme} pack={state.settings.themePack}>
       <GameView state={state} dispatch={dispatch} initial={initial} />
@@ -216,12 +241,11 @@ function GameView({
   const [showDaily, setShowDaily] = useState(false);
   const [showChallenge, setShowChallenge] = useState(false);
 
-  const MAX_CODE_LENGTH = 16384;
-
   /** The games that are not on screen, one slot per mode. */
   const parked = useRef<Partial<Record<GameMode, GameState>>>({
+    free: initial.screen === 'challenge' ? initial.free : undefined,
     daily: initial.daily ?? undefined,
-    challenge: initial.challenge ?? undefined,
+    challenge: initial.screen === 'challenge' ? undefined : initial.challenge ?? undefined,
   });
   const [challengeInfo, setChallengeInfo] = useState<Challenge | null>(initial.challengeInfo);
 
@@ -281,6 +305,10 @@ function GameView({
     if (state.elapsed > 0 && state.elapsed % 10 === 0) persist(state);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.elapsed]);
+  // Remembered so a relaunch brings a challenge back on screen (see the boot).
+  useEffect(() => {
+    saveScreen(state.mode);
+  }, [state.mode]);
   // The shared settings are kept outside both games, so a change made while
   // the daily is on screen still survives a restart and a switch. The intro
   // flag travels in the same record, so it is written from here as well —
@@ -332,22 +360,28 @@ function GameView({
 
   /**
    * On the web, the challenge the page's address named when it loaded, as its code. The browser
-   * keeps a followed link in the address bar and a reload reads it again, which is how a reload
-   * carries on with that challenge. Once it is won, or another challenge takes the slot, the
-   * link is taken out of the address: left there, the next reload started the challenge just
-   * won over again and counted another game played.
+   * keeps a followed link in the address bar and a reload reads it again, which carries on with
+   * that challenge even when nothing could be saved. The link is taken out of the address once it
+   * is won (left there, the next reload started the challenge just won over again and counted
+   * another game played), once another challenge takes the slot, and once the player leaves it
+   * for another game: left there, a reload took them off the game they were playing and back to
+   * the challenge, and the free game they left has no way back but New game, which replaces it.
+   * The challenge stays in its slot, and its link resumes it.
    */
   const addressChallenge = useRef<string | null>(null);
   const forgetAddressChallenge = useCallback(() => {
     if (addressChallenge.current === null) return;
     addressChallenge.current = null;
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.history.replaceState(window.history.state, '', withoutChallengeLink(window.location.href));
-    }
+    if (Platform.OS === 'web') clearChallengeLinkFromUrl();
   }, []);
+  useEffect(() => {
+    if (state.mode !== 'challenge') forgetAddressChallenge();
+  }, [state.mode, forgetAddressChallenge]);
 
   // A win: fold it into the profile once per game.
-  const wonSeed = useRef<number | null>(initial.free.status === 'won' ? initial.free.seed : null);
+  const wonSeed = useRef<number | null>(
+    firstGame(initial).status === 'won' ? firstGame(initial).seed : null,
+  );
   useEffect(() => {
     if (state.status !== 'won' || wonSeed.current === state.seed) return;
     wonSeed.current = state.seed;
@@ -452,9 +486,10 @@ function GameView({
   /**
    * A challenge from a link, which whoever wrote it can make the app follow.
    * There is one challenge slot, so the one already being played is resumed
-   * rather than started over, and a different one replaces a challenge with
-   * moves in it only once the player says so (see receiveChallenge). The
-   * sheet's Play this board is the player's own choice and starts its board.
+   * rather than started over (and the one just won left on screen), and a
+   * different one replaces a challenge with moves in it only once the player
+   * says so (see receiveChallenge). The sheet's Play this board is the
+   * player's own choice and starts its board.
    */
   const offerChallenge = useCallback(
     (challenge: Challenge) => {
@@ -462,6 +497,9 @@ function GameView({
       switch (receiveChallenge(current, challengeInfo, challenge)) {
         case 'resume':
           switchTo('challenge');
+          return;
+        case 'finished':
+          // The challenge just won is the one on screen; it stays there.
           return;
         case 'ask':
           confirmAction({
@@ -527,29 +565,18 @@ function GameView({
   };
 
   // A tapped challenge link, whether it cold-started the app or arrived while
-  // it was already open: sudokuoku://c/<code>, the link challengeLink writes.
+  // it was already open: sudokuoku://c/<code> in the app, the site's own
+  // address with #/c/<code> on the web (the links challengeLink writes), and
+  // the older /c/<code> and ?/c/<code> forms (see challengeCodeFromUrl).
   const offerChallengeRef = useRef(offerChallenge);
   offerChallengeRef.current = offerChallenge;
-
-  const getChallengeCode = (url: string): string | null => {
-    const match = CHALLENGE_LINK.exec(url);
-    if (!match) return null;
-    const rawCode = match[1];
-    if (!rawCode || rawCode.length > MAX_CODE_LENGTH) return null;
-    try {
-      const decoded = decodeURIComponent(rawCode);
-      return decoded.length <= MAX_CODE_LENGTH ? decoded : null;
-    } catch {
-      return rawCode.length <= MAX_CODE_LENGTH ? rawCode : null;
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
 
     const handle = (url: string | null) => {
       if (!url || cancelled) return;
-      const code = getChallengeCode(url);
+      const code = challengeCodeFromUrl(url);
       if (!code) return;
       const result = decodeChallenge(code);
       if (result.ok) {

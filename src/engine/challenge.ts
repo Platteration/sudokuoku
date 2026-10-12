@@ -363,21 +363,27 @@ export function challengeFromState(state: GameState, withGhost: boolean): Challe
  *   in the address bar and reads it again on every reload, and a phone can
  *   hand the same one over again, so starting it afresh each time threw the
  *   game away.
+ * - `finished`: it is the challenge just won, still on screen. A challenge is
+ *   a single attempt, so its link leaves the finished board where it is
+ *   rather than starting it again and counting another game played. Once the
+ *   player moves on, the won game is discarded and the link starts afresh.
  * - `ask`: it is a different challenge and the one in progress has moves in
  *   it, which starting the new one would destroy. A link is opened by
  *   whoever wrote it, so that is the player's to decide, not the link's.
  * - `start`: nothing would be lost.
  */
-export type ReceiveChallenge = 'resume' | 'ask' | 'start';
+export type ReceiveChallenge = 'resume' | 'finished' | 'ask' | 'start';
 
 export function receiveChallenge(
   current: GameState | null | undefined,
   currentFrom: Challenge | null,
   incoming: Challenge,
 ): ReceiveChallenge {
-  if (!current || current.status !== 'playing') return 'start';
+  if (!current) return 'start';
   // The code is the challenge's canonical form: the same board, rules and ghost.
-  if (currentFrom && encodeChallenge(currentFrom) === encodeChallenge(incoming)) return 'resume';
+  const same = currentFrom !== null && encodeChallenge(currentFrom) === encodeChallenge(incoming);
+  if (current.status !== 'playing') return same ? 'finished' : 'start';
+  if (same) return 'resume';
   return current.moves > 0 ? 'ask' : 'start';
 }
 
