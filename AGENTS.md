@@ -216,7 +216,9 @@ at a name mapped to 127.0.0.1, which Chromium would otherwise count as secure). 
 template: `npm run web` serves it too, and under the policy Metro's reload socket is refused and
 its error overlay, which writes HTML from strings, breaks the dev page (measured).
 `src/__tests__/website.test.ts` holds every copy equal and the cache rules of the three hosts to
-one sample of paths. It reads `deploy/nginx.conf` block by block, as nginx does: every
+one sample of paths. It reads `deploy/nginx.conf` block by block, as nginx does, and resolves
+each address as nginx does before choosing a location (percent-decoded, slashes merged, `.` and
+`..` resolved, so `/api/../.git/config` is `/.git/config`, a 404, never the API's): every
 `add_header` is the https server's own and none is in a location, since a location that adds one
 header inherits none of the server's, but for the one stated exception, `location ^~ /api/`,
 which proxies the sign-in and shop API (which sends its own headers) and whose one `add_header`
@@ -224,8 +226,11 @@ is the server block's Strict-Transport-Security line as written there; Cache-Con
 through the header the server actually sends. nginx and Apache serve the site's own addresses and nothing else (an allow-list
 of the page, the 404 page, the safety net, the icon, robots.txt, security.txt, the hashed bundle
 and font, and ACME's `.well-known/acme-challenge/`), and the test walks the sample and every
-`git ls-files` path through both (nginx hands `/api/` to the API; `.htaccess` cannot proxy, so
-Apache answers it 404 unless the virtual host has the `ProxyPass` its header names); Netlify can
+`git ls-files` path through both (nginx hands `/api/` to the API, and answers `/api` itself with
+the 404 page through `location = /api`, where its own answer is a 301 carrying none of the
+server's headers; `.htaccess` cannot proxy, so Apache answers it 404 unless the virtual host has
+the `ProxyPass` its header names, and the Strict-Transport-Security line for `/api/` it names
+beside it, since what the proxy answers gets none of `.htaccess`'s headers); Netlify can
 only refuse by name, so `_redirects` names the hosting files, `_routes.json` and `metadata.json`
 with `404!` (a plain rule does not apply where a file exists).
 `deploy/nginx.conf` needs nginx 1.25.1 for `http2 on;` and says what to write on an older one.

@@ -15,8 +15,8 @@ import { after, before, describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import catalogue from './catalogue.js';
 import { AMOUNT, PRICE, createFakes, envFor, signedDelivery } from './fakes.mjs';
-import { priceVariable, validateCatalogue } from './kit/app.js';
-import { pagesHandler } from './kit/cloudflare.js';
+import { createApp, priceVariable, validateCatalogue } from './kit/app.js';
+import { kvStore, pagesHandler } from './kit/cloudflare.js';
 import { start } from './start.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -284,6 +284,147 @@ describe('a host of its own: server/start.mjs through the Node adapter', () => {
       });
       assert.equal(response.status, 403, String(origin));
     }
+  });
+});
+
+describe('what Delete account leaves, and what a refund takes back, as the README says', () => {
+  // README, "Sign-in and Support this app": "A full refund or a dispute takes it back; a partial
+  // refund leaves it", and Delete account "removes all of it but a count of the hour's Buy presses,
+  // which names the account id and expires within two hours", with "a payment whose webhook arrives
+  // after the deletion ... recorded under the account when it does". Each is the kit's behaviour,
+  // read back here from Cloudflare's KV (the reference host), so the sentence and the kit cannot
+  // part without this failing.
+  const APP_URL = 'https://sudokuoku.example/';
+  /** @type {Awaited<ReturnType<typeof createFakes>>} */
+  let fakes;
+  before(async () => {
+    fakes = await createFakes();
+  });
+
+  /**
+   * The app over a KV namespace of its own, which keeps what each key was last written with and
+   * its expirationTtl.
+   */
+  const site = () => {
+    /** @type {Map<string, string>} */
+    const data = new Map();
+    /** @type {Map<string, number>} */
+    const ttl = new Map();
+    const namespace = {
+      get: async (/** @type {string} */ key) => (data.has(key) ? JSON.parse(data.get(key) ?? 'null') : null),
+      put: async (/** @type {string} */ key, /** @type {string} */ value, /** @type {{ expirationTtl?: number } | undefined} */ options) => {
+        data.set(key, value);
+        if (options?.expirationTtl === undefined) ttl.delete(key);
+        else ttl.set(key, options.expirationTtl);
+      },
+      delete: async (/** @type {string} */ key) => {
+        data.delete(key);
+        ttl.delete(key);
+      },
+    };
+    const app = createApp({ catalogue, env: envFor(APP_URL), store: kvStore(() => namespace), fetch: fakes.fetch });
+    return { app, data, ttl };
+  };
+
+  /** A browser's cookie jar, against the app as Cloudflare Pages runs it. */
+  const visitor = (/** @type {ReturnType<typeof createApp>} */ app) => {
+    /** @type {Map<string, string>} */
+    const jar = new Map();
+    /** @param {string} method @param {string} target @param {unknown} [json] */
+    const send = async (method, target, json) => {
+      const headers = new Headers();
+      if (jar.size) headers.set('cookie', [...jar].map(([name, value]) => `${name}=${value}`).join('; '));
+      if (method !== 'GET') headers.set('origin', 'https://sudokuoku.example');
+      if (json !== undefined) headers.set('content-type', 'application/json');
+      const response = await app.handle(new Request(new URL(target, APP_URL), { method, headers, body: json === undefined ? undefined : JSON.stringify(json), redirect: 'manual' }));
+      for (const cookie of response.headers.getSetCookie()) {
+        const [pair = ''] = cookie.split(';');
+        const name = pair.slice(0, pair.indexOf('='));
+        if (/;\s*Max-Age=0(?:;|$)/i.test(cookie)) jar.delete(name);
+        else jar.set(name, pair.slice(pair.indexOf('=') + 1));
+      }
+      return response;
+    };
+    /** @param {{ sub: string, email: string }} person */
+    const signIn = async (person) => {
+      const started = await send('GET', 'api/auth/google/start?return=%2F');
+      assert.equal((await send('GET', fakes.consent(started.headers.get('location') ?? '', person).href)).status, 302);
+    };
+    const held = async () => /** @type {{ entitlements: string[] }} */ (await (await send('GET', 'api/me')).json()).entitlements;
+    /** Buy, and the checkout.session.completed Stripe would sign once it is paid (not yet sent). */
+    const buy = async () => {
+      const { url } = /** @type {{ url: string }} */ (await (await send('POST', 'api/checkout', { product: 'supporter' })).json());
+      return fakes.paid(url);
+    };
+    return { send, signIn, held, buy };
+  };
+  /** @param {ReturnType<typeof createApp>} app @param {Record<string, unknown>} event */
+  const deliver = async (app, event) => {
+    const { body, signature } = signedDelivery(event);
+    const answer = await app.handle(new Request(new URL('api/webhooks/stripe', APP_URL), { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body }));
+    assert.equal(answer.status, 200, await answer.text());
+  };
+  /** The PaymentIntent a paid checkout.session.completed names. */
+  const intentOf = (/** @type {Record<string, any>} */ paid) => String(paid.data.object.payment_intent);
+  /** Stripe's charge.refunded for the payment `paid` made, `refunded` of its 300. */
+  const refund = (/** @type {Record<string, unknown>} */ paid, /** @type {number} */ refunded) => ({
+    id: `evt_refund${refunded}${intentOf(paid).replace(/[^0-9A-Za-z]/g, '')}`,
+    object: 'event',
+    type: 'charge.refunded',
+    livemode: false,
+    created: Math.floor(Date.now() / 1000),
+    data: { object: { id: `ch_${refunded}`, object: 'charge', payment_intent: intentOf(paid), amount: 300, amount_refunded: refunded, refunded: refunded >= 300 } },
+  });
+
+  it('a partial refund leaves the support; a full one takes it back', async () => {
+    const { app } = site();
+    const ada = visitor(app);
+    await ada.signIn({ sub: '3001', email: 'ada@example.com' });
+    const paid = await ada.buy();
+    await deliver(app, paid);
+    assert.deepEqual(await ada.held(), ['supporter']);
+    await deliver(app, refund(paid, 100));
+    assert.deepEqual(await ada.held(), ['supporter'], 'a partial refund');
+    await deliver(app, refund(paid, 300));
+    assert.deepEqual(await ada.held(), [], 'the whole amount refunded');
+  });
+
+  it('Delete account leaves only the hour’s count of Buy presses naming the account, for two hours at most', async () => {
+    const { app, data, ttl } = site();
+    const grace = visitor(app);
+    await grace.signIn({ sub: '3002', email: 'grace@example.com' });
+    const paid = await grace.buy();
+    await deliver(app, paid);
+    assert.deepEqual(await grace.held(), ['supporter']);
+    const intent = intentOf(paid);
+    const naming = () => [...data.keys()].filter((key) => /3002|grace@example\.com|cus_sudokuoku1/.test(`${key} ${data.get(key)}`) || `${key} ${data.get(key)}`.includes(intent));
+    assert.ok(naming().length >= 4, `the session, the user, the payment and the count: ${naming().join(' | ')}`);
+    assert.equal((await grace.send('DELETE', 'api/me')).status, 204);
+    assert.deepEqual(
+      naming().map((key) => key.replace(/:\d+$/, ':<hour>')),
+      ['sudokuoku:test:ratelimit:google:3002:<hour>'],
+    );
+    const left = naming()[0] ?? '';
+    assert.ok((ttl.get(left) ?? Infinity) <= 2 * 60 * 60, `${left} expires within two hours`);
+  });
+
+  it('a payment whose webhook arrives after the deletion is recorded under the account', async () => {
+    const { app } = site();
+    const lin = visitor(app);
+    await lin.signIn({ sub: '3003', email: 'lin@example.com' });
+    const paid = await lin.buy();
+    assert.equal((await lin.send('DELETE', 'api/me')).status, 204);
+    await deliver(app, paid);
+    await lin.signIn({ sub: '3003', email: 'lin@example.com' });
+    assert.deepEqual(await lin.held(), ['supporter']);
+  });
+
+  it('and the README says so', () => {
+    const readme = read('README.md').replace(/\s+/g, ' ');
+    assert.match(readme, /A full refund or a dispute takes it back; a partial refund leaves it\./);
+    assert.match(readme, /Delete account removes all of it but a count of the hour's Buy presses, which names the account id and expires within two hours/);
+    assert.match(readme, /a payment whose webhook arrives after the deletion is recorded under the account when it does/);
+    assert.doesNotMatch(readme, /removes all of it;/);
   });
 });
 

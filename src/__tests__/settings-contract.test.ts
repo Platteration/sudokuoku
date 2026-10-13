@@ -126,6 +126,26 @@ describe('the About card', () => {
     expect(SUPPORTER_THANKS).toBe(`Thank you for supporting ${APP_NAME}.`);
   });
 
+  it('the privacy-policy author is told what the website keeps, as About says it', () => {
+    // docs/store-listing.md is what a privacy policy will be written from: About's sentence and
+    // it change together.
+    const notes = fs.readFileSync(path.join(root, 'docs/store-listing.md'), 'utf8');
+    const data = /^## Data notes for the privacy-policy author\n([\s\S]*)$/m.exec(notes)?.[1] ?? '';
+    for (const fact of [
+      'Nothing leaves the visitor\'s device for it unless they sign in or buy.',
+      'Google tells the site an account id and the email address',
+      'a payment goes through Stripe, which handles it',
+      "The site keeps the account id, what was bought and Stripe's customer id, and the email address only in the sign-in session",
+      "Delete account removes them, but for a count of the hour's Buy presses that names the account id and expires within two hours",
+      'The iOS and Android apps have none of this',
+    ]) {
+      expect(data).toContain(fact);
+    }
+    for (const fact of ['an account id and your email address', "what was bought and Stripe's customer id"]) {
+      expect(PRIVACY_WITH_ACCOUNT).toContain(fact);
+    }
+  });
+
   it('shows the configured version, and a placeholder that cannot pass for one', () => {
     expect(appVersion(app.version)).toBe(app.version);
     expect(app.version).toBe(pkg.version);

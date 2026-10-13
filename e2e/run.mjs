@@ -24,7 +24,9 @@
  * kit as its `fetch`, and the whole flow is played under the site's policy: sign in (Google's
  * authorize page answered by page.route with the redirect back to the callback), Support this app
  * (Checkout answered the same way), Stripe's signed webhook (and a forged one refused), the
- * thanks, sign out, sign in again, delete the account, a sign-in that fails, a cancelled Checkout.
+ * thanks, sign out, sign in again, delete the account, a Buy after the session ended in another
+ * tab (401: Sign in to buy) and one of what another tab bought (409: Owned, pressed twice at once
+ * and asked once, the other buttons waiting), a sign-in that fails, a cancelled Checkout.
  *
  *   npm run test:e2e
  */
@@ -849,6 +851,67 @@ try {
       await text('Signed in as ada@example.com').waitFor();
       check('signed in after deleting, nothing is held', (await button(page, 'Buy').count()) === 1 && !(await thanked()));
 
+      // A Buy the page is behind on. The answer has nothing of its own to say (checkoutNote), so the
+      // card drawn again from api/me is the visitor's answer. Chromium logs each refused fetch as a
+      // console error: that one line is excused, by its words and its address.
+      const excuse = (status) => {
+        const line = `console.error: Failed to load resource: the server responded with a status of ${status} @ ${shopHome}api/checkout`;
+        const found = seen.errors.filter((e) => e === line).length;
+        seen.errors = seen.errors.filter((e) => e !== line);
+        return found;
+      };
+      /** A request the page itself makes to its api/, as another tab of the site would. */
+      const fromPage = (method, route, body = null) =>
+        page.evaluate(
+          async ([m, r, b]) => {
+            const answer = await fetch(`api/${r}`, { method: m, headers: b ? { 'content-type': 'application/json' } : {}, body: b ? JSON.stringify(b) : undefined });
+            return { status: answer.status, body: answer.status === 200 ? await answer.json() : null };
+          },
+          [method, route, body]
+        );
+      // Signed out in another tab: Buy is answered 401, and the card asks the visitor to sign in.
+      check('signing out in another tab', (await fromPage('POST', 'auth/logout')).status === 204);
+      await button(page, 'Buy').click();
+      await button(page, 'Sign in to buy').waitFor();
+      check(
+        'a Buy after the session ended draws the card again: Sign in to buy, Sign in with Google, nothing else said',
+        (await button(page, 'Sign in with Google').count()) === 1 && (await button(page, 'Buy').count()) === 0 && (await text('Signed in as ada@example.com').count()) === 0 && (await text('The shop could not be reached. Try again.').count()) === 0
+      );
+      check('and Chromium logged the 401, once', excuse('401 (Unauthorized)') === 1, seen.errors.join(' | '));
+      await leaveAndReturn('Sign in with Google', callback);
+      await openSettings();
+      await text('Signed in as ada@example.com').waitFor();
+      // Bought in another tab, its webhook in: Buy is answered 409, and the card says Owned. The
+      // Buy is held at the API meanwhile, pressed twice in one moment (before React draws again).
+      const elsewhere = await fromPage('POST', 'checkout', { product: 'supporter' });
+      check('buying in another tab', elsewhere.status === 200 && typeof elsewhere.body?.url === 'string', JSON.stringify(elsewhere));
+      check('and Stripe’s webhook for it is taken', (await deliver(signedDelivery(fakes.paid(elsewhere.body.url)))).status === 200);
+      let release = () => {};
+      const held = new Promise((resolve) => (release = resolve));
+      const buys = [];
+      await page.route(`${shopHome}api/checkout`, async (route) => {
+        buys.push(route.request().method());
+        await held;
+        await route.continue();
+      });
+      await button(page, 'Buy').evaluate((el) => {
+        el.click();
+        el.click();
+      });
+      await until(page, async () => buys.length > 0);
+      await settle(page);
+      const disabled = async (name) => (await button(page, name).getAttribute('aria-disabled')) === 'true';
+      check('two presses of Buy in one moment ask api/checkout once', buys.length === 1, buys.join(' '));
+      check('while the Buy is under way, Sign out and Delete account wait for it', (await disabled('Sign out')) && (await disabled('Delete account')));
+      release();
+      await text('Owned').waitFor();
+      await page.unroute(`${shopHome}api/checkout`);
+      check(
+        'a Buy of what was bought meanwhile draws the card again: Owned, the thanks, nothing else said, and nothing left for Checkout',
+        (await thanked()) && (await button(page, 'Buy').count()) === 0 && (await text('The shop could not be reached. Try again.').count()) === 0 && checkouts.length === 1
+      );
+      check('and Chromium logged the 409, once', excuse('409 (Conflict)') === 1, seen.errors.join(' | '));
+
       // A sign-in Google refuses comes back to the site, which says so once and cleans the address.
       await button(page, 'Sign out').click();
       await button(page, 'Sign in with Google').waitFor();
@@ -873,7 +936,7 @@ try {
     check('the kit sent the browser to Google’s authorize URL each time', startProblems.length === 0, startProblems.join(' | '));
     check(
       'the page left the site only for Google and Checkout, each answered in the browser',
-      JSON.stringify(seen.left) === JSON.stringify(answered) && answered.filter((u) => u.startsWith(GOOGLE)).length === 4 && checkouts.length === 1,
+      JSON.stringify(seen.left) === JSON.stringify(answered) && answered.filter((u) => u.startsWith(GOOGLE)).length === 5 && checkouts.length === 1,
       seen.left.join(' | ')
     );
     check('the fakes were asked nothing they do not serve, and the kit warned of nothing', fakes.unexpected.length === 0 && logs.length === 0, [...fakes.unexpected, ...logs].join(' | '));

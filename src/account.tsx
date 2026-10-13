@@ -1,15 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { accountClient } from './accountClient';
-import {
-  ACCOUNT_NOTES,
-  AccountClient,
-  AccountState,
-  OFF_STATE,
-  SIGNED_OUT,
-  SUPPORTER_PRODUCT,
-  checkoutNote,
-  loadAccount,
-} from './accountModel';
+import { AccountActions, AccountClient, AccountState, OFF_STATE, SIGNED_OUT, accountActions, loadAccount } from './accountModel';
 
 /**
  * The website's account and "Support this app", for the screens. In the iOS and Android apps the
@@ -60,24 +51,8 @@ export function AccountProvider({ children, client = accountClient }: { children
     if (alive.current) setState((s) => ({ ...s, me: me ?? SIGNED_OUT }));
   }, [client]);
 
-  const signOut = useCallback(async () => {
-    if (!(await client.signOut())) return ACCOUNT_NOTES.signOutFailed;
-    await refresh();
-    return null;
-  }, [client, refresh]);
-
-  const deleteAccount = useCallback(async () => {
-    if (!(await client.deleteAccount())) return ACCOUNT_NOTES.deleteFailed;
-    await refresh();
-    return null;
-  }, [client, refresh]);
-
-  const buySupport = useCallback(async () => {
-    const result = await client.checkout(SUPPORTER_PRODUCT);
-    // Signed out meanwhile, or already a supporter: what the sheet shows is stale.
-    if (result === 'signin' || result === 'owned') await refresh();
-    return checkoutNote(result);
-  }, [client, refresh]);
+  /** Sign out, Delete account or Buy, and whether it asks api/me again after (accountActions). */
+  const act = useCallback((name: keyof AccountActions) => accountActions(client, refresh)[name](), [client, refresh]);
 
   const api = useMemo<AccountApi>(
     () =>
@@ -86,12 +61,12 @@ export function AccountProvider({ children, client = accountClient }: { children
             state,
             dismissNotice: () => setState((s) => ({ ...s, notice: null })),
             signIn: () => client.signIn(),
-            signOut,
-            deleteAccount,
-            buySupport,
+            signOut: () => act('signOut'),
+            deleteAccount: () => act('deleteAccount'),
+            buySupport: () => act('buySupport'),
           }
         : OFF,
-    [state, client, signOut, deleteAccount, buySupport],
+    [state, client, act],
   );
   return <AccountContext.Provider value={api}>{children}</AccountContext.Provider>;
 }

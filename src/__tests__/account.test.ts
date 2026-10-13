@@ -12,6 +12,7 @@ import {
   AccountClient,
   AccountState,
   ApiConfig,
+  CheckoutResult,
   Landing,
   Me,
   NO_LANDING,
@@ -19,11 +20,13 @@ import {
   POLL,
   SIGNED_OUT,
   WORDS,
+  accountActions,
   accountView,
   checkoutNote,
   formatPrice,
   landingOf,
   loadAccount,
+  oneAtATime,
   pollFor,
   readApiConfig,
   readMe,
@@ -100,6 +103,14 @@ describe('api/me', () => {
 
   it('keeps only entitlements of the kit’s shape, once each', () => {
     expect(readMe({ user: null, entitlements: ['supporter', 'supporter', 'Supporter', 7, null, 'pro', '-x', 'a'.repeat(33)] })?.entitlements).toEqual(['supporter', 'pro']);
+  });
+
+  it('keeps at most fifty entitlements, and an email of at most 320 characters', () => {
+    const many = Array.from({ length: 60 }, (_, i) => `e${i}`);
+    expect(readMe({ user: null, entitlements: many })?.entitlements).toEqual(many.slice(0, 50));
+    const email = (length: number) => `${'a'.repeat(length - '@example.com'.length)}@example.com`;
+    expect(readMe({ user: { email: email(320) }, entitlements: [] })?.user).toEqual({ email: email(320) });
+    expect(readMe({ user: { email: email(321) }, entitlements: [] })?.user).toEqual({ email: null });
   });
 
   it('is unreadable when it is not the kit’s shape', () => {
@@ -297,6 +308,20 @@ describe('the account as the page starts', () => {
     expect(updates.map((u) => u.notice)).toEqual([null]);
   });
 
+  it('leaves the address as it was when nothing listens by the time api/config answers', async () => {
+    // Taking the landing rewrites the address (history.replaceState): not for a page that has gone.
+    let listening = true;
+    const { client, calls } = fakeClient({ me: [ada()], landing: { signIn: 'failed', purchase: null } });
+    const original = client.config;
+    client.config = async () => {
+      listening = false;
+      return original();
+    };
+    const { updates } = await load(client, () => listening);
+    expect(calls).toEqual(['config']);
+    expect(updates).toEqual([]);
+  });
+
   it('stops as soon as nothing listens any more', async () => {
     let listening = true;
     const { client } = fakeClient({ me: [ada()], landing: { signIn: null, purchase: 'success' } });
@@ -382,6 +407,106 @@ describe('what Settings draws', () => {
     expect(ACCOUNT_NOTES.deleteTitle).toBe('Delete account?');
     expect(ACCOUNT_NOTES.deleteBody).toMatch(/your support with it.*The payment itself stays with Stripe/);
     expect(PRIVACY_WITH_ACCOUNT).toMatch(/^Nothing leaves your device unless you sign in or buy\. /);
+  });
+});
+
+describe('Sign out, Delete account and Buy', () => {
+  /** A client whose signOut, deleteAccount and checkout answer as given, and a refresh that records when it has ended. */
+  function acting({ ended = true, checkout = 'redirecting' as CheckoutResult } = {}) {
+    const { client, calls } = fakeClient();
+    client.signOut = async () => (calls.push('signOut'), ended);
+    client.deleteAccount = async () => (calls.push('deleteAccount'), ended);
+    client.checkout = async (product) => (calls.push(`checkout ${product}`), checkout);
+    // Ends a whole turn later, so a caller that does not wait for it resolves first.
+    const refresh = async () => {
+      calls.push('refresh');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      calls.push('refreshed');
+    };
+    return { actions: accountActions(client, refresh), calls };
+  }
+
+  it('asks who is signed in after a sign-out or a deletion the server carried out, and has nothing to say', async () => {
+    for (const name of ['signOut', 'deleteAccount'] as const) {
+      const { actions, calls } = acting();
+      expect(await actions[name]()).toBeNull();
+      expect(calls).toEqual([name, 'refresh', 'refreshed']);
+    }
+  });
+
+  it('says when the server did not sign out or delete, and asks nothing more', async () => {
+    const signOut = acting({ ended: false });
+    expect(await signOut.actions.signOut()).toBe('Could not sign out. Try again.');
+    expect(signOut.calls).toEqual(['signOut']);
+    const deletion = acting({ ended: false });
+    expect(await deletion.actions.deleteAccount()).toBe('The account could not be deleted. Try again.');
+    expect(deletion.calls).toEqual(['deleteAccount']);
+  });
+
+  it('after a Buy the server answered 401 or 409, asks who is signed in and what they hold: the redrawn card is the answer', async () => {
+    // Signed out in another tab, or the session expired (401): the card becomes Sign in to buy.
+    // Bought in another tab (409): it becomes Owned. checkoutNote has nothing to say for either.
+    for (const checkout of ['signin', 'owned'] as const) {
+      const { actions, calls } = acting({ checkout });
+      expect(await actions.buySupport(), checkout).toBeNull();
+      expect(calls, checkout).toEqual(['checkout supporter', 'refresh', 'refreshed']);
+    }
+  });
+
+  it('after any other Buy, says what checkoutNote says and asks nothing more', async () => {
+    for (const checkout of ['redirecting', 'unavailable', 'busy', 'failed'] as const) {
+      const { actions, calls } = acting({ checkout });
+      expect(await actions.buySupport(), checkout).toBe(checkoutNote(checkout));
+      expect(calls, checkout).toEqual(['checkout supporter']);
+    }
+  });
+});
+
+describe('one account action at a time', () => {
+  /** An action that ends when `end` is called with what it says. */
+  function pending() {
+    let end: (note: string | null) => void = () => {};
+    const started: number[] = [];
+    const action = () => {
+      started.push(started.length);
+      return new Promise<string | null>((resolve) => (end = resolve));
+    };
+    return { action, started, end: (note: string | null) => end(note) };
+  }
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('says it is busy, clears the last note, says what the action said, and is not busy once it has', async () => {
+    const busy: boolean[] = [];
+    const said: (string | null)[] = [];
+    const run = oneAtATime((on) => busy.push(on));
+    const first = pending();
+    expect(run(first.action, (note) => said.push(note))).toBe(true);
+    expect(busy).toEqual([true]);
+    expect(said).toEqual([null]);
+    first.end('Could not sign out. Try again.');
+    await settled();
+    expect(said).toEqual([null, 'Could not sign out. Try again.']);
+    expect(busy).toEqual([true, false]);
+  });
+
+  it('refuses a second press while the first runs, even before anything is drawn again, and takes the next once it has ended', async () => {
+    const busy: boolean[] = [];
+    const said: (string | null)[] = [];
+    const run = oneAtATime((on) => busy.push(on));
+    const first = pending();
+    const second = pending();
+    expect(run(first.action, (note) => said.push(note))).toBe(true);
+    expect(run(second.action, (note) => said.push(`second: ${note}`))).toBe(false);
+    expect(second.started).toEqual([]);
+    first.end(null);
+    await settled();
+    expect(said).toEqual([null, null]);
+    expect(run(second.action, (note) => said.push(`second: ${note}`))).toBe(true);
+    expect(second.started).toEqual([0]);
+    second.end('Support is not on sale right now.');
+    await settled();
+    expect(said).toEqual([null, null, 'second: null', 'second: Support is not on sale right now.']);
+    expect(busy).toEqual([true, false, true, false]);
   });
 });
 

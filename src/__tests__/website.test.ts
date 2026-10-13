@@ -133,16 +133,49 @@ function fromNginx(): Record<string, string> {
 }
 
 /**
- * What nginx answers an address with, by its locations, as nginx chooses: an exact location first;
- * else the longest matching prefix, when that prefix carries `^~`; else the first regular
- * expression that matches in file order; else the longest prefix. `served` means the file is sent
- * if it exists, `proxied` that the location hands the request to a `proxy_pass` (the website's
- * API); a number is the status a location returns (`internal` is a 404 from outside).
+ * The path nginx chooses a location by: the address percent-decoded, its runs of slashes merged
+ * and its `.` and `..` segments resolved (merge_slashes is on by default). Null where nginx refuses
+ * the request instead: a `..` above the root, or a `%` that is not an escape (400 Bad Request).
  */
-function nginxAnswer(server: NginxDirective[], uri: string): 'served' | 'proxied' | number {
+function nginxPath(address: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(address);
+  } catch {
+    return null;
+  }
+  const segments = decoded.replace(/\/{2,}/g, '/').split('/').slice(1);
+  const out: string[] = [];
+  for (const [i, segment] of segments.entries()) {
+    if (segment === '..') {
+      if (out.length === 0) return null;
+      out.pop();
+    } else if (segment !== '.') {
+      out.push(segment);
+      continue;
+    }
+    // a path that ends in a dot segment ends in a slash: /api/.. is /
+    if (i === segments.length - 1) out.push('');
+  }
+  return `/${out.join('/')}`;
+}
+
+/**
+ * What nginx answers an address with, by its locations, as nginx chooses for the path it resolves
+ * (nginxPath): an exact location first; else, for the name of a prefix location that ends in a
+ * slash and proxies, given without the slash, nginx's own 301 to it (auto_redirect); else the
+ * longest matching prefix, when that prefix carries `^~`; else the first regular expression that
+ * matches in file order; else the longest prefix. `served` means the file is sent if it exists,
+ * `proxied` that the location hands the request to a `proxy_pass` (the website's API); a number is
+ * the status a location returns (`internal` is a 404 from outside), or nginx's own.
+ */
+function nginxAnswer(server: NginxDirective[], address: string): 'served' | 'proxied' | number {
+  const uri = nginxPath(address);
+  if (uri === null) return 400;
   const locations = server.filter((d) => d.name === 'location');
   const exact = locations.find((l) => l.args[0] === '=' && l.args[1] === uri);
   const prefixOf = (l: NginxDirective) => (l.args.length === 1 ? l.args[0]! : l.args[0] === '^~' ? l.args[1]! : null);
+  if (!exact && locations.some((l) => prefixOf(l) === `${uri}/` && l.block!.some((d) => d.name === 'proxy_pass'))) return 301;
   const longest = locations
     .filter((l) => prefixOf(l) !== null && uri.startsWith(prefixOf(l)!))
     .sort((a, b) => prefixOf(b)!.length - prefixOf(a)!.length)[0];
@@ -392,7 +425,13 @@ const NOT_SITE = [
 ];
 
 /** Addresses under the website's api/ (server/kit), which nginx hands to the API and Apache does not. */
-const API = ['/api/config', '/api/auth/google/callback', '/api/webhooks/stripe', '/api/', '/api/.env', '/api/../.git/config'];
+const API = ['/api/config', '/api/auth/google/callback', '/api/webhooks/stripe', '/api/', '/api/.env', '/api//config', '/api/%2Fconfig', '/api/./config', '//api/config', '/api/config/..', '/api/.'];
+/**
+ * Addresses that start with /api but are not under it: /api itself, and paths whose dot segments,
+ * written plainly or escaped, climb out of it. nginx resolves them before it picks a location, so
+ * they are the site's addresses (or not) like any other.
+ */
+const NOT_API = ['/api', '/api/../.git/config', '/api/%2e%2e/.git/config', '/api/%2E%2E/README.md', '/api/./../deploy/nginx.conf'];
 
 describe('what the hosts refuse', () => {
   it('nginx: the site and nothing else; the hosting files, folders and every file of a checkout answer 404', () => {
@@ -411,6 +450,15 @@ describe('what the hosts refuse', () => {
     // JSON 404), never to the folder; nothing the repository tracks is under it.
     expect(API.filter((p) => answer(p) !== 'proxied')).toEqual([]);
     expect(tracked().filter((p) => p.startsWith('/api/'))).toEqual([]);
+    // /api is not the API's: the 404 page with the site's headers, where nginx's own answer
+    // would be a 301 to /api/ carrying none of them. Climbing out of /api/ reaches the site's
+    // rules, never the API: a checkout's files stay 404, and the page is the page.
+    expect(NOT_API.filter((p) => answer(p) !== 404)).toEqual([]);
+    const withoutIt = server.filter((d) => !(d.name === 'location' && d.args[0] === '=' && d.args[1] === '/api'));
+    expect(withoutIt, 'the file has the location for /api').toHaveLength(server.length - 1);
+    expect(nginxAnswer(withoutIt, '/api'), 'nginx 1.24 without it (measured)').toBe(301);
+    expect(answer('/api/%2e%2e/index.html')).toBe('served');
+    expect([answer('/..'), answer('/api/../..'), answer('/api/%zz')]).toEqual([400, 400, 400]);
     expect(answer('/404.html'), 'the 404 page is the error page, not a page of its own').toBe(404);
     // folders list nothing, a 403 shows the 404 page, and plain http is sent to https
     expect(text).toMatch(/^\s*error_page 404 \/404\.html;$/m);
@@ -456,8 +504,15 @@ describe('what the hosts refuse', () => {
     expect([...NOT_SITE, ...tracked()].filter((p) => answer(p) !== 404)).toEqual([]);
     // .htaccess cannot proxy (mod_proxy is server configuration): without the virtual host's
     // ProxyPass, the API's addresses are not the site's, and the page draws no sign-in.
-    expect(API.filter((p) => answer(p) !== 404)).toEqual([]);
+    expect([...API, ...NOT_API].filter((p) => answer(p) !== 404)).toEqual([]);
     expect(conf).toMatch(/^# .*ProxyPass "\/api\/" "http:\/\/127\.0\.0\.1:8788\/api\/"/m);
+    // With that ProxyPass, what the API answers gets none of this file's headers (Apache 2.4.58,
+    // measured), and the API sends no HSTS: the header and the README give the virtual host's
+    // lines for it, with this file's own value.
+    const hsts = /^\s*Header always set Strict-Transport-Security "([^"]+)"$/m.exec(conf)?.[1];
+    expect(hsts).toBe(fromNginx()['Strict-Transport-Security']);
+    expect(conf).toContain(`\n#   <Location "/api/">\n#     Header always set Strict-Transport-Security "${hsts}"\n#   </Location>\n`);
+    expect(read('README.md').replace(/\s+/g, ' ')).toContain(`\`<Location "/api/"> Header always set Strict-Transport-Security "${hsts}" </Location>\``);
     // over plain http, everything is sent to https first
     expect([...SITE, ...NOT_SITE].filter((p) => apacheAnswer(conf, p, false) !== 301)).toEqual([]);
     expect(conf).toMatch(/^Options -Indexes$/m);

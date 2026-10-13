@@ -212,17 +212,22 @@ against Google's keys; the session is an HttpOnly `__Host-sudokuoku-session`
 cookie whose store keeps only a hash. Buy creates a Checkout Session and the page
 navigates to Stripe's hosted page (no Stripe or Google script, frame or image is
 ever loaded); back on the site the page asks `api/me` a few times, and only
-Stripe's signed webhook grants the support. A refund or a dispute takes it back.
+Stripe's signed webhook grants the support. A full refund or a dispute takes it
+back; a partial refund leaves it.
 `server/kit/README.md` says the rest, and the owner's checklist.
 
 What leaves the visitor's device, and only if they sign in or buy: Google tells
 the site an account id and the email address; Stripe handles the payment. The
 site keeps the account id, what was bought, Stripe's customer id, and the email
 address only in the session (gone at sign-out, or after thirty days). Delete
-account removes all of it; the payment itself stays with Stripe. About says so
-on such a site. The thanks in About is drawn by the page from what the server
-reports: someone who edits their own copy of the page can show themselves the
-line without paying. It unlocks nothing, so there is nothing to protect.
+account removes all of it but a count of the hour's Buy presses, which names the
+account id and expires within two hours (so deleting is no way round the limit
+on them); a payment whose webhook arrives after the deletion is recorded under
+the account when it does, as it was paid for. The payment itself stays with
+Stripe. About says so on such a site. The thanks in About is drawn by the page
+from what the server reports: someone who edits their own copy of the page can
+show themselves the line without paying. It unlocks nothing, so there is
+nothing to protect.
 
 **To turn it on**, on Cloudflare Pages (the reference host, one project and one
 origin for this app):
@@ -262,10 +267,15 @@ under a service manager as its own user, with the same variables in its
 environment, listens on `127.0.0.1:8788` and keeps its records as files in that
 directory (outside the web root). `deploy/nginx.conf`'s `location ^~ /api/`
 proxies to it; with nothing listening there nginx answers 502 and the page
-shows no sign-in. Apache's `.htaccess` cannot proxy: put
+shows no sign-in; `/api` itself is the 404 page, where nginx would answer it with
+a redirect of its own. Apache's `.htaccess` cannot proxy: put
 `ProxyPass "/api/" "http://127.0.0.1:8788/api/"` in the virtual host (with
-`mod_proxy` and `mod_proxy_http`). Netlify runs no function of this site, so
-there it stays off.
+`mod_proxy` and `mod_proxy_http`). The `.htaccess` headers do not reach what the
+proxy answers and the API sends no Strict-Transport-Security of its own, so add
+it there for `/api/` as nginx does:
+`<Location "/api/"> Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" </Location>`
+(each on a line of its own). Netlify runs no function of this site, so there it
+stays off.
 
 ## Challenge a friend
 

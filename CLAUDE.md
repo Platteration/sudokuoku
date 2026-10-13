@@ -39,7 +39,10 @@ runs, `api/config` is a 404 and nothing is drawn. A supporter gets one line of t
   modules. `server/fakes.mjs` is a fake Google and Stripe for the tests, handed to the kit as
   its `fetch`: nothing points the kit at another host.
 - The page's side: `src/accountModel.ts` (pure: reads `api/config` and `api/me` field by field,
-  the words, `loadAccount` and `accountView`, which every decision goes through so vitest can
+  the words, `loadAccount`, `accountView`, `accountActions` (Sign out, Delete account and Buy, and
+  when each asks `api/me` again: a Buy answered 401 or 409 has nothing of its own to say, so the
+  redrawn card is its answer) and `oneAtATime` (the sheet runs one of them at a time, refusing a
+  second press before React has drawn again), which every decision goes through so vitest can
   drive it without a renderer), `src/accountClient.web.ts` (the only module that makes a request,
   to the site's own `api/` alone, and leaves only for `api/auth/google/start` or a
   `https://checkout.stripe.com/` address), its inert native twin `src/accountClient.ts`,
@@ -48,7 +51,12 @@ runs, `api/config` is a 404 and nothing is drawn. A supporter gets one line of t
   the page's path and query, never its fragment, which is where a challenge link keeps its code.
 - `npm run test:e2e` plays the whole flow in Chromium under the site's policy with the kit beside
   the built site (`e2e/serve.mjs`'s `api`): sign in, Buy, the signed webhook, the thanks, sign
-  out, delete, a refused sign-in and a cancelled Checkout.
+  out, delete, a Buy after another tab signed out (401: Sign in to buy) and one of what another
+  tab bought (409: Owned; pressed twice at once and asked once, Sign out and Delete account
+  disabled meanwhile), a refused sign-in and a cancelled Checkout. `server/api.test.mjs` holds
+  the README's account of deletion and refunds to the kit: a partial refund leaves the support,
+  and Delete account leaves only the hour's count of Buy presses naming the account, for two
+  hours at most.
 
 ## Conventions
 

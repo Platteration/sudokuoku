@@ -16,7 +16,7 @@ import {
 } from '../engine';
 import { APP_NAME, LICENCE, SOURCE_URL, TAGLINE, appVersion } from '../about';
 import { useAccount } from '../account';
-import { ACCOUNT_NOTES, WORDS, accountView } from '../accountModel';
+import { ACCOUNT_NOTES, WORDS, accountView, oneAtATime } from '../accountModel';
 import { confirmAction } from '../confirm';
 import { Colors, THEME_PACKS, radius, useStyles, useTheme } from '../theme';
 import { defaultShared } from '../utils/saved';
@@ -132,15 +132,8 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
   /** ...and what the support card says when Buy did not leave for Checkout. */
   const [shopNote, setShopNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Runs one account action at a time, and shows what it says when it did not work. */
-  const run = (action: () => Promise<string | null>, say: (note: string | null) => void) => {
-    if (busy) return;
-    setBusy(true);
-    say(null);
-    void action()
-      .then(say)
-      .finally(() => setBusy(false));
-  };
+  /** Runs one account action at a time, and shows what it says when it did not work (oneAtATime). */
+  const [run] = useState(() => oneAtATime(setBusy));
   const onDeleteAccount = () =>
     // Confirmed because the account, and the record of the support with it, cannot be brought
     // back from here. The payment itself stays with Stripe.

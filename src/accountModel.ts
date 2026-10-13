@@ -290,6 +290,65 @@ export function checkoutNote(result: CheckoutResult): string | null {
   return ACCOUNT_NOTES[result];
 }
 
+/** Sign out, Delete account and Buy; each says what to tell the visitor when it did not work, or null. */
+export interface AccountActions {
+  signOut: () => Promise<string | null>;
+  deleteAccount: () => Promise<string | null>;
+  buySupport: () => Promise<string | null>;
+}
+
+/**
+ * The three account actions, on `client`, with `refresh` asking `api/me` again and drawing what it
+ * says. A sign-out or a deletion the server carried out is followed by a refresh. So is a Buy the
+ * server answered 401 (the session ended meanwhile: signed out in another tab, or expired) or 409
+ * (the support was bought meanwhile, in another tab): checkoutNote says nothing for either, so the
+ * card drawn again from `api/me` (Sign in to buy, or Owned) is the only answer that press gets.
+ * Each resolves once its refresh has.
+ */
+export function accountActions(client: AccountClient, refresh: () => Promise<void>): AccountActions {
+  return {
+    async signOut() {
+      if (!(await client.signOut())) return ACCOUNT_NOTES.signOutFailed;
+      await refresh();
+      return null;
+    },
+    async deleteAccount() {
+      if (!(await client.deleteAccount())) return ACCOUNT_NOTES.deleteFailed;
+      await refresh();
+      return null;
+    },
+    async buySupport() {
+      const result = await client.checkout(SUPPORTER_PRODUCT);
+      if (result === 'signin' || result === 'owned') await refresh();
+      return checkoutNote(result);
+    },
+  };
+}
+
+/**
+ * Runs the account actions one at a time, for the Settings sheet: `busy` is told when one starts
+ * and when it has ended (the sheet disables the other buttons meanwhile), `say(null)` clears the
+ * last note, and `say` then gets what the action said. A press that arrives while one is running
+ * is refused, and the call returns false: the flag is set as the action starts, where a check of
+ * the rendered `busy` reads false for every press until React has drawn again.
+ */
+export function oneAtATime(busy: (on: boolean) => void): (action: () => Promise<string | null>, say: (note: string | null) => void) => boolean {
+  let running = false;
+  return (action, say) => {
+    if (running) return false;
+    running = true;
+    busy(true);
+    say(null);
+    void action()
+      .then(say)
+      .finally(() => {
+        running = false;
+        busy(false);
+      });
+    return true;
+  };
+}
+
 /** What the Settings sheet draws of the account, the shop and About's privacy line. */
 export interface AccountView {
   /** The Account card, or null when the site offers no sign-in. */
