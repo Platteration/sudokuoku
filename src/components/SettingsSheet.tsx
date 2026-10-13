@@ -14,7 +14,9 @@ import {
   ThemePreference,
   matchingPreset,
 } from '../engine';
-import { APP_NAME, LICENCE, PRIVACY, SOURCE_URL, TAGLINE, appVersion } from '../about';
+import { APP_NAME, LICENCE, SOURCE_URL, TAGLINE, appVersion } from '../about';
+import { useAccount } from '../account';
+import { ACCOUNT_NOTES, WORDS, accountView } from '../accountModel';
 import { confirmAction } from '../confirm';
 import { Colors, THEME_PACKS, radius, useStyles, useTheme } from '../theme';
 import { defaultShared } from '../utils/saved';
@@ -120,6 +122,35 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
   const { colors } = useTheme();
   const [difficulty, setDifficulty] = useState<Difficulty>(settings.difficulty);
   const active_preset = matchingPreset(settings)?.id ?? null;
+  // The website's sign-in and "Support this app" (server/kit behind the site's own api/). In the
+  // iOS and Android apps, and on a site whose host runs no api/, both cards are null and nothing
+  // of them is drawn; About's privacy line says what is true for each (src/about.ts).
+  const account = useAccount();
+  const view = accountView(account.state, Platform.OS === 'web');
+  /** What the Account card says when signing out or deleting did not work. */
+  const [accountNote, setAccountNote] = useState<string | null>(null);
+  /** ...and what the support card says when Buy did not leave for Checkout. */
+  const [shopNote, setShopNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** Runs one account action at a time, and shows what it says when it did not work. */
+  const run = (action: () => Promise<string | null>, say: (note: string | null) => void) => {
+    if (busy) return;
+    setBusy(true);
+    say(null);
+    void action()
+      .then(say)
+      .finally(() => setBusy(false));
+  };
+  const onDeleteAccount = () =>
+    // Confirmed because the account, and the record of the support with it, cannot be brought
+    // back from here. The payment itself stays with Stripe.
+    confirmAction({
+      title: ACCOUNT_NOTES.deleteTitle,
+      message: ACCOUNT_NOTES.deleteBody,
+      cancelLabel: ACCOUNT_NOTES.deleteCancel,
+      confirmLabel: ACCOUNT_NOTES.deleteConfirm,
+      onConfirm: () => run(account.deleteAccount, setAccountNote),
+    });
 
   const toggleKind = (kind: ShiftKind, on: boolean) => {
     const set = new Set(settings.enabledShifts);
@@ -416,13 +447,50 @@ export default function SettingsSheet({ visible, settings, daily, onClose, onCha
         }
       />
 
+      {view.account ? (
+        <>
+          <Text style={styles.section}>{WORDS.section}</Text>
+          <View style={styles.about}>
+            {view.account.signedIn ? (
+              <>
+                {view.account.line ? <Text style={styles.aboutTitle}>{view.account.line}</Text> : null}
+                <PrimaryButton label={WORDS.signOut} variant="secondary" size="md" disabled={busy} onPress={() => run(account.signOut, setAccountNote)} />
+                <PrimaryButton label={WORDS.deleteAccount} variant="danger" size="md" disabled={busy} onPress={onDeleteAccount} />
+              </>
+            ) : (
+              <PrimaryButton label={WORDS.signIn} variant="secondary" size="md" onPress={account.signIn} />
+            )}
+            {accountNote ? <Text style={styles.accountNote}>{accountNote}</Text> : null}
+          </View>
+        </>
+      ) : null}
+
+      {view.support ? (
+        <>
+          <Text style={styles.section}>{view.support.name}</Text>
+          <View style={styles.about}>
+            <Text style={styles.aboutText}>{view.support.description}</Text>
+            {view.support.price ? <Text style={styles.price}>{view.support.price}</Text> : null}
+            {view.support.action === 'owned' ? (
+              <Text style={styles.owned}>{WORDS.owned}</Text>
+            ) : view.support.action === 'buy' ? (
+              <PrimaryButton label={WORDS.buy} size="md" busy={busy} onPress={() => run(account.buySupport, setShopNote)} />
+            ) : (
+              <PrimaryButton label={WORDS.signInToBuy} variant="secondary" size="md" onPress={account.signIn} />
+            )}
+            {shopNote ? <Text style={styles.accountNote}>{shopNote}</Text> : null}
+          </View>
+        </>
+      ) : null}
+
       <Text style={styles.section}>About</Text>
       <View style={styles.about}>
         <Text style={styles.aboutTitle}>
           {APP_NAME} {appVersion(Constants.expoConfig?.version)}
         </Text>
         <Text style={styles.aboutText}>{TAGLINE}</Text>
-        <Text style={styles.aboutText}>{PRIVACY}</Text>
+        <Text style={styles.aboutText}>{view.privacy}</Text>
+        {view.thanks ? <Text style={styles.thanks}>{view.thanks}</Text> : null}
         <Press
           onPress={WEB_LINK === null ? openSource : undefined}
           {...(WEB_LINK ?? {})}
@@ -616,6 +684,29 @@ const makeStyles = (colors: Colors) =>
   },
   aboutLink: {
     alignSelf: 'flex-start',
+    marginTop: 8,
+  },
+  price: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 6,
+  },
+  owned: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.success,
+    marginTop: 8,
+  },
+  thanks: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+    marginTop: 4,
+  },
+  accountNote: {
+    fontSize: 13,
+    color: colors.danger,
     marginTop: 8,
   },
   aboutLinkText: {

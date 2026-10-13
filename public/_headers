@@ -16,14 +16,20 @@
 # the page with the empty-string hash in place of 'unsafe-inline' and checks that those two texts
 # are all it refuses. Nothing else is inline: no script, no event handler, no eval, and Trusted
 # Types refuse any HTML from a string.
-# connect-src is 'none' because the app has no network code. Permissions-Policy turns off every
+# connect-src is 'self' for the site's own api/ and nothing else: the sign-in and "Support this
+# app" API of server/kit, where the host runs it (README, "Sign-in and Support this app"). The
+# page asks api/config once as it starts, and api/me, checkout, logout and the account's deletion
+# only when the visitor uses them. Google and Stripe are top-level navigations, which connect-src
+# does not govern, and nothing else is fetched: the game itself has no network code. With 'none'
+# the api/config request is refused and reported, so no sign-in could ever be drawn (measured).
+# Permissions-Policy turns off every
 # feature the suite's Chromium knows, client hints aside, but clipboard-read and clipboard-write,
 # the challenge sheet's Copy and Paste (the suite reads the allowed list back off the page).
 # web-share (the result card) is left at its default, this origin, because Chromium on Linux
 # does not know the name and says so in the console.
 
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer

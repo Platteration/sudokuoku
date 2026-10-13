@@ -8,8 +8,11 @@ where it belongs.
 
 Built with [Expo](https://expo.dev) (React Native + TypeScript). One codebase
 targets iOS, Android and a website, which plays entirely in the browser: the
-puzzle is generated there and the games are kept there, and nothing is sent
-anywhere.
+puzzle is generated there and the games are kept there, and no game is sent
+anywhere. A website whose host runs its small API can also offer sign-in with
+Google and a "Support this app" payment (see
+[Sign-in and Support this app](#sign-in-and-support-this-app)); without it, as on
+GitHub Pages, neither is shown.
 
 ## Running it
 
@@ -33,9 +36,10 @@ set in `app.json`.
 The website is one folder. `npm run build:web` writes it to `dist/`: the page
 (`index.html`), the app's bundle under `_expo/static/`, the icon font under
 `assets/`, the safety net (`guard.js`), `404.html`, `favicon.ico`,
-`robots.txt`, `.well-known/security.txt`, and the three hosting files
-`_headers` (Netlify, Cloudflare Pages), `_redirects` (Netlify) and `.htaccess`
-(Apache), each of which the other hosts ignore. They come from `public/`, which
+`robots.txt`, `.well-known/security.txt`, and the four hosting files
+`_headers` (Netlify, Cloudflare Pages), `_redirects` (Netlify), `.htaccess`
+(Apache) and `_routes.json` (Cloudflare Pages, written by the build: which
+addresses run the sign-in and shop API), each of which the other hosts ignore. They come from `public/`, which
 the export copies whole. Publish `dist/` as it is: on Netlify or Cloudflare
 Pages the build command is `npm run build:web` and the publish directory
 `dist`; on Apache copy the folder into the document root (`.htaccess` travels
@@ -78,7 +82,7 @@ any two copies differ, and `npm run test:e2e` plays the game under them in
 Chromium:
 
 ```text
-Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: no-referrer
@@ -99,9 +103,12 @@ other two `<style>` elements would not need it: react-native-web's stylesheet
 is empty and filled through `insertRule` (the hash of the empty string covers
 it), and the page's reset is fixed text a file could carry. The end-to-end
 suite serves the page with the empty-string hash in its place and checks that
-those two are all it refuses. `connect-src 'none'` holds the "no
-network code" promise in the browser: a request the app tried to make would be
-refused and reported. `frame-ancestors 'none'` and `X-Frame-Options` keep the
+those two are all it refuses. `connect-src 'self'` lets the page ask its own
+site's `api/` (the sign-in and shop, below) and nothing else: the game itself
+has no network code, Google and Stripe are reached by navigating to them, which
+`connect-src` does not govern, and any other request the page tried to make
+would be refused and reported. With `'none'` the page's question to `api/config`
+is refused, so no sign-in could ever be shown (measured). `frame-ancestors 'none'` and `X-Frame-Options` keep the
 game out of other sites' frames. `Permissions-Policy` turns off every feature
 the suite's Chromium knows (client hints aside) but the clipboard the
 challenge sheet copies to and pastes from, and the suite reads the allowed
@@ -127,7 +134,9 @@ file is on the default branch. And every project site of an account shares one o
 `<user>.github.io`: the web build keeps the games, settings and progress in
 that origin's `localStorage`, under keys that start `sudokuoku:`, where any
 other app published on the origin can read and overwrite them. Give the site a
-domain or subdomain of its own, which gives it an origin of its own.
+domain or subdomain of its own, which gives it an origin of its own. GitHub
+Pages runs no functions, so there the sign-in and the shop stay off: the page
+asks `api/config` once, gets the 404 page, and shows neither.
 
 **Not found.** `404.html` is what a wrong address shows, in the Classic look
 and with no script; Netlify, Cloudflare Pages and GitHub Pages pick it up by
@@ -171,10 +180,92 @@ curl -sI https://SITE/.git/HEAD | head -1          # 404
 curl -sI https://SITE/_headers | head -1           # 404
 curl -s  https://SITE/_expo/ | grep -c 'Page not found'   # 1: the 404 page, not a listing
 curl -sI https://SITE/.well-known/security.txt | head -1  # 200
+curl -s  https://SITE/api/config                   # {"auth":{"google":…},"shop":…} where the API runs; the 404 page where it does not
 ```
 
 Then open the site, play a move, open every sheet, and check that the browser
 console shows no `Content Security Policy` line.
+
+## Sign-in and Support this app
+
+The website can sign a visitor in with Google and sell one thing: **Support this
+app**, a one-time payment through Stripe Checkout. It changes nothing in the
+game (every puzzle, shift, preset, colour pack and assist is the same for
+everyone); a supporter gets a line of thanks in About, "Thank you for supporting
+Sudokuoku." The iOS and Android apps have neither: they keep no network code and
+INTERNET stays blocked, and a purchase there would need the stores' own in-app
+purchase.
+
+It is **off until the keys are set**. The page asks its own site's `api/config`
+once as it starts; a 404 (GitHub Pages, Netlify, Apache or nginx without the
+API), a network error or nothing configured means no Account card, no support
+card and nothing stored or asked again, and the page is the game it always was.
+On a site that offers it, Settings shows an Account card (Sign in with Google;
+signed in, the address Google gave, Sign out and Delete account, which asks
+first) and a Support this app card (its price; Sign in to buy, Buy, or Owned)
+between Reset to defaults and About.
+
+How it works: `server/kit/` (a shared kit, copied byte for byte, never edited
+here) is a small backend on the site's own origin under `api/`. Sign-in is
+Google's OpenID Connect code flow with PKCE, state and nonce, ID tokens checked
+against Google's keys; the session is an HttpOnly `__Host-sudokuoku-session`
+cookie whose store keeps only a hash. Buy creates a Checkout Session and the page
+navigates to Stripe's hosted page (no Stripe or Google script, frame or image is
+ever loaded); back on the site the page asks `api/me` a few times, and only
+Stripe's signed webhook grants the support. A refund or a dispute takes it back.
+`server/kit/README.md` says the rest, and the owner's checklist.
+
+What leaves the visitor's device, and only if they sign in or buy: Google tells
+the site an account id and the email address; Stripe handles the payment. The
+site keeps the account id, what was bought, Stripe's customer id, and the email
+address only in the session (gone at sign-out, or after thirty days). Delete
+account removes all of it; the payment itself stays with Stripe. About says so
+on such a site. The thanks in About is drawn by the page from what the server
+reports: someone who edits their own copy of the page can show themselves the
+line without paying. It unlocks nothing, so there is nothing to protect.
+
+**To turn it on**, on Cloudflare Pages (the reference host, one project and one
+origin for this app):
+
+1. Google Cloud: an OAuth consent screen (app name, support email, privacy
+   policy URL, the site's domain), and a **Web application** OAuth client whose
+   authorised redirect URI is `https://<site>/api/auth/google/callback`.
+   `openid email` needs no verification review.
+2. Stripe (test mode first, card `4242 4242 4242 4242`): a Product "Support
+   this app" with a one-time Price; a webhook endpoint at
+   `https://<site>/api/webhooks/stripe` subscribed to
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`, `charge.refunded`,
+   `charge.dispute.created`, `customer.subscription.updated` and
+   `customer.subscription.deleted`; a restricted key with Checkout Sessions
+   write, Prices read, Customer portal write and Customers write.
+3. Cloudflare Pages: build command `npm run build:web`, output `dist`; a KV
+   namespace bound as `KIT_STORE`; and, as encrypted variables, `APP_URL`
+   (`https://<site>/`, with the slash), `SESSION_SECRET` (32 random bytes,
+   base64url: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`),
+   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `STRIPE_SECRET_KEY`,
+   `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRICE_SUPPORTER` (the Price id). A
+   partial set logs one warning naming what is missing and leaves the feature
+   off.
+
+`functions/api/[[path]].js` is the Function, and the build writes
+`_routes.json` so that only `/api/*` runs it. Cloudflare's documentation says
+`_headers` and `_redirects` do not apply to a Function's responses, so the API
+sends its own headers (`default-src 'none'`, `no-store`, `no-referrer`) and the
+site's rules keep to the static files; a missing static address still gets the
+site's `404.html`. A site under a sub-path on Cloudflare (one whose every page is
+this app's) moves the entry to `functions/sudokuoku/api/[[path]].js`, and the
+build's `_routes.json` already names `/sudokuoku/api/*`.
+
+**Self-hosted**: `KIT_DATA_DIR=/var/lib/sudokuoku-api node server/start.mjs`,
+under a service manager as its own user, with the same variables in its
+environment, listens on `127.0.0.1:8788` and keeps its records as files in that
+directory (outside the web root). `deploy/nginx.conf`'s `location ^~ /api/`
+proxies to it; with nothing listening there nginx answers 502 and the page
+shows no sign-in. Apache's `.htaccess` cannot proxy: put
+`ProxyPass "/api/" "http://127.0.0.1:8788/api/"` in the virtual host (with
+`mod_proxy` and `mod_proxy_http`). Netlify runs no function of this site, so
+there it stays off.
 
 ## Challenge a friend
 
@@ -239,7 +330,7 @@ contrast pack and a Reduce motion control (system, on or off) are in Settings.
 ```bash
 npm run lint              # eslint (the shared Expo preset, eslint.config.js)
 npm run typecheck         # tsc --noEmit
-npm test                  # vitest: generator, solver, every shift, phantoms, the game reducer
+npm test                  # node --test: the kit's self-test and this app's API; then vitest: generator, solver, every shift, phantoms, the game reducer, the account
 npm run test:conventions  # the shared repository conventions (CONVENTIONS.md)
 npm run check             # all of the above: the gate before a push
 npm run test:e2e          # the website: built for /sudokuoku/, served with its own headers, played in Chromium
@@ -254,7 +345,11 @@ challenge sent, copied and pasted, a board solved to the win sheet, a new
 game confirmed, the invitation the site wrote followed in another browser,
 challenge links followed, followed again, reloaded, left for a free game and
 reloaded, posted a message, replaced, won and reloaded, and a paste far longer
-than any challenge.
+than any challenge. Then it serves the same site with its sign-in and shop API
+beside it, a fake Google and Stripe handed to the API, and plays that flow under
+the same policy: sign in, Buy, Stripe's signed webhook (and a forged one
+refused), the thanks, sign out, sign in again, delete the account, a sign-in
+that fails and a cancelled Checkout.
 It reads back which browser features the page is allowed, loads the site with
 no headers over plain http at a name that is not loopback, and measures which
 inline styles need `'unsafe-inline'`. It fails on any policy report, uncaught
@@ -412,9 +507,17 @@ src/components/*            number pad, controls, shift banner, sheets
 src/screens/GameScreen.tsx  wires the reducer, timer, persistence, profile, free/daily switching and sheets
 src/storage.ts              AsyncStorage save/load for both games, the profile and flags
 src/theme.tsx               colour packs, ThemeProvider, useStyles
+src/accountModel.ts         the website's sign-in and support: what api/ says, read field by field, and what is drawn
+src/accountClient.web.ts    the web build's client for the site's own api/; accountClient.ts is the apps' inert twin
+src/account.tsx             the provider; AccountNotice.tsx is the game screen's line after sign-in or payment
+server/kit/                 the shared sign-in, Checkout and webhook backend (copied verbatim; its README)
+server/catalogue.js         what the website sells: Support this app, granting supporter
+server/start.mjs            the API on a host of its own (127.0.0.1:8788, behind nginx)
+functions/api/[[path]].js   the API on Cloudflare Pages
 public/                     the website's own files, copied into the build: index.html (the
                             page template), guard.js, 404.html, robots.txt, .well-known/,
                             and the hosting files _headers, _redirects and .htaccess
+                            (the build adds _routes.json)
 deploy/nginx.conf           the same hosting rules for nginx
 scripts/build-web.mjs       npm run build:web: the export, plus the base path for public/'s pages
 app.config.js               WEB_BASE_PATH for a sub-path build; otherwise app.json as it is

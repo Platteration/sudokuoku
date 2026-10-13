@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { OUT_FOLDERS, withBase, withPolicy } from '../../scripts/build-web.mjs';
+import { OUT_FOLDERS, routesFor, withBase, withPolicy } from '../../scripts/build-web.mjs';
 import { headersFor, metaPolicy, parseHeaders } from '../../scripts/headers.mjs';
 import { SOURCE_URL } from '../about';
 import { darkColors, lightColors } from '../palette';
@@ -133,18 +133,24 @@ function fromNginx(): Record<string, string> {
 }
 
 /**
- * What nginx answers an address with, by its locations: an exact location first, then the first
- * regular expression that matches in file order, then the longest prefix. `served` means the file
- * is sent if it exists; a number is the status a location returns (`internal` is a 404 from outside).
+ * What nginx answers an address with, by its locations, as nginx chooses: an exact location first;
+ * else the longest matching prefix, when that prefix carries `^~`; else the first regular
+ * expression that matches in file order; else the longest prefix. `served` means the file is sent
+ * if it exists, `proxied` that the location hands the request to a `proxy_pass` (the website's
+ * API); a number is the status a location returns (`internal` is a 404 from outside).
  */
-function nginxAnswer(server: NginxDirective[], uri: string): 'served' | number {
+function nginxAnswer(server: NginxDirective[], uri: string): 'served' | 'proxied' | number {
   const locations = server.filter((d) => d.name === 'location');
   const exact = locations.find((l) => l.args[0] === '=' && l.args[1] === uri);
+  const prefixOf = (l: NginxDirective) => (l.args.length === 1 ? l.args[0]! : l.args[0] === '^~' ? l.args[1]! : null);
+  const longest = locations
+    .filter((l) => prefixOf(l) !== null && uri.startsWith(prefixOf(l)!))
+    .sort((a, b) => prefixOf(b)!.length - prefixOf(a)!.length)[0];
   const regex = locations.find((l) => l.args[0] === '~' && new RegExp(l.args[1]!).test(uri));
-  const prefix = locations.filter((l) => l.args.length === 1 && uri.startsWith(l.args[0]!)).sort((a, b) => b.args[0]!.length - a.args[0]!.length)[0];
-  const chosen = exact ?? regex ?? prefix;
+  const chosen = exact ?? (longest?.args[0] === '^~' ? longest : undefined) ?? regex ?? longest;
   if (!chosen) return 404;
   if (chosen.block!.some((d) => d.name === 'internal')) return 404;
+  if (chosen.block!.some((d) => d.name === 'proxy_pass')) return 'proxied';
   const returned = chosen.block!.find((d) => d.name === 'return');
   return returned ? Number(returned.args[0]) : 'served';
 }
@@ -247,7 +253,7 @@ describe('the policy', () => {
     expect(() => withPolicy('<html><head></head></html>', policy)).toThrow(/exactly one/);
   });
 
-  it('allows only what the app loads: its own scripts, styles, icon and font, and nothing else', () => {
+  it('allows only what the app loads: its own scripts, styles, icon and font, its own api/, and nothing else', () => {
     const csp = directives(header['Content-Security-Policy']!);
     expect(csp.get('default-src')).toEqual(["'none'"]);
     expect(csp.get('script-src')).toEqual(["'self'"]);
@@ -256,7 +262,12 @@ describe('the policy', () => {
     expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'"]);
     expect(csp.get('img-src')).toEqual(["'self'"]);
     expect(csp.get('font-src')).toEqual(["'self'"]);
-    expect(csp.get('connect-src')).toEqual(["'none'"]); // no network code
+    // The site's own api/ (server/kit) and nothing else: the game has no network code, and Google
+    // and Stripe are top-level navigations, which connect-src does not govern.
+    expect(csp.get('connect-src')).toEqual(["'self'"]);
+    // Nothing else changed for them: no frame, form, script or image from Google or Stripe.
+    for (const name of ['frame-src', 'child-src', 'worker-src']) expect(csp.has(name), name).toBe(false);
+    expect(csp.get('form-action')).toEqual(["'none'"]);
     for (const name of ['base-uri', 'form-action', 'object-src', 'frame-ancestors']) expect(csp.get(name), name).toEqual(["'none'"]);
     expect(csp.get('upgrade-insecure-requests')).toEqual([]);
     expect(csp.get('require-trusted-types-for')).toEqual(["'script'"]);
@@ -364,6 +375,7 @@ const NOT_SITE = [
   '/_headers',
   '/_redirects',
   '/.htaccess',
+  '/_routes.json',
   '/metadata.json',
   '/README.md',
   '/.git/config',
@@ -379,17 +391,26 @@ const NOT_SITE = [
   '/assets/icon.png',
 ];
 
+/** Addresses under the website's api/ (server/kit), which nginx hands to the API and Apache does not. */
+const API = ['/api/config', '/api/auth/google/callback', '/api/webhooks/stripe', '/api/', '/api/.env', '/api/../.git/config'];
+
 describe('what the hosts refuse', () => {
   it('nginx: the site and nothing else; the hosting files, folders and every file of a checkout answer 404', () => {
     const text = read('deploy/nginx.conf');
     const server = tlsServer(parseNginx(text));
-    // the forms nginxAnswer knows: an exact location, a regular expression, a plain prefix, none nested
+    // the forms nginxAnswer knows: an exact location, a regular expression, a plain prefix, the
+    // API's ^~ prefix, none nested
     const locations = server.filter((d) => d.name === 'location');
-    expect(locations.filter((l) => !((l.args.length === 2 && ['=', '~'].includes(l.args[0]!)) || (l.args.length === 1 && l.args[0]!.startsWith('/'))))).toEqual([]);
+    expect(locations.filter((l) => !((l.args.length === 2 && ['=', '~', '^~'].includes(l.args[0]!)) || (l.args.length === 1 && l.args[0]!.startsWith('/'))))).toEqual([]);
+    expect(locations.filter((l) => l.args[0] === '^~').map((l) => l.args[1])).toEqual(['/api/']);
     expect(locations.filter((l) => everyDirective(l.block!).some(({ directive }) => directive.name === 'location'))).toEqual([]);
     const answer = (p: string) => nginxAnswer(server, p);
     expect([...SITE, CERTIFICATE_CHECK].filter((p) => answer(p) !== 'served')).toEqual([]);
     expect([...NOT_SITE, ...tracked()].filter((p) => answer(p) !== 404)).toEqual([]);
+    // The API's addresses go to the API, which answers them (a path it does not know is its own
+    // JSON 404), never to the folder; nothing the repository tracks is under it.
+    expect(API.filter((p) => answer(p) !== 'proxied')).toEqual([]);
+    expect(tracked().filter((p) => p.startsWith('/api/'))).toEqual([]);
     expect(answer('/404.html'), 'the 404 page is the error page, not a page of its own').toBe(404);
     // folders list nothing, a 403 shows the 404 page, and plain http is sent to https
     expect(text).toMatch(/^\s*error_page 404 \/404\.html;$/m);
@@ -399,12 +420,21 @@ describe('what the hosts refuse', () => {
     expect(text).toMatch(/^\s*return 301 https:\/\/\$host\$request_uri;$/m);
   });
 
-  it('nginx: every header is the https server’s own, sent always, and no location adds one', () => {
+  it('nginx: every header is the https server’s own, sent always, and no location adds one but the API’s', () => {
     // nginx gives a location the server's add_headers only when it has none of its own: one Vary
     // in a location served its files with no policy, nosniff, HSTS or Cache-Control.
     const conf = nginxConf();
     const server = tlsServer(conf);
-    const elsewhere = everyDirective(conf).filter(({ directive, parent }) => directive.name === 'add_header' && parent !== server);
+    // The one stated exception is the API's location (server/kit/README.md, "Self-hosted"): the
+    // API sends its own headers, and the server block's beside them would be two of each (a
+    // browser reads the last Referrer-Policy). Its one add_header is the server block's HSTS
+    // line, exactly as written there; every other location still adds none.
+    const api = server.find((d) => d.name === 'location' && d.args[0] === '^~' && d.args[1] === '/api/');
+    expect(api, 'the API location').toBeDefined();
+    const hsts = server.find((d) => d.name === 'add_header' && d.args[0] === 'Strict-Transport-Security');
+    expect(api!.block!.filter((d) => d.name === 'add_header').map((d) => d.args)).toEqual([hsts!.args]); // both were just found
+    expect(api!.block!.find((d) => d.name === 'proxy_pass')?.args).toEqual(['http://127.0.0.1:8788']); // no URI: the path reaches the API as sent
+    const elsewhere = everyDirective(conf).filter(({ directive, parent }) => directive.name === 'add_header' && parent !== server && parent !== api!.block);
     expect(elsewhere.map(({ directive }) => directive.args.join(' '))).toEqual([]);
     const headers = server.filter((d) => d.name === 'add_header');
     expect(headers.map((d) => d.args[0])).toEqual([...SECURITY_HEADERS, 'Cache-Control']);
@@ -424,6 +454,10 @@ describe('what the hosts refuse', () => {
     const answer = (p: string) => apacheAnswer(conf, p);
     expect([...SITE, '/404.html', CERTIFICATE_CHECK].filter((p) => answer(p) !== 'served')).toEqual([]);
     expect([...NOT_SITE, ...tracked()].filter((p) => answer(p) !== 404)).toEqual([]);
+    // .htaccess cannot proxy (mod_proxy is server configuration): without the virtual host's
+    // ProxyPass, the API's addresses are not the site's, and the page draws no sign-in.
+    expect(API.filter((p) => answer(p) !== 404)).toEqual([]);
+    expect(conf).toMatch(/^# .*ProxyPass "\/api\/" "http:\/\/127\.0\.0\.1:8788\/api\/"/m);
     // over plain http, everything is sent to https first
     expect([...SITE, ...NOT_SITE].filter((p) => apacheAnswer(conf, p, false) !== 301)).toEqual([]);
     expect(conf).toMatch(/^Options -Indexes$/m);
@@ -438,7 +472,7 @@ describe('what the hosts refuse', () => {
       .map((l) => l.trim().split(/\s+/));
     // `404!`: Netlify does not apply a plain rule where a file exists at the path
     expect(rules.every((r) => r.length === 3 && r[1] === '/404.html' && r[2] === '404!')).toBe(true);
-    expect(rules.map((r) => r[0])).toEqual(['/_headers', '/_redirects', '/.htaccess', '/metadata.json']);
+    expect(rules.map((r) => r[0])).toEqual(['/_headers', '/_redirects', '/.htaccess', '/_routes.json', '/metadata.json']);
   });
 });
 
@@ -561,6 +595,8 @@ describe('the build script', () => {
         expect(box.exporter()?.args).toEqual(['export', '--platform', 'web', '--output-dir', written]);
         expect(fs.existsSync(path.join(written, 'metadata.json')), out).toBe(false);
         expect(fs.readFileSync(path.join(written, 'index.html'), 'utf8')).toContain('<meta http-equiv="Content-Security-Policy"');
+        // Cloudflare Pages runs the site's one Function for the API's addresses alone.
+        expect(JSON.parse(fs.readFileSync(path.join(written, '_routes.json'), 'utf8')), out).toEqual({ version: 1, include: ['/api/*'], exclude: [] });
       }
       // and to dist/ when nothing says otherwise
       expect(box.run()).toEqual({ status: 0, stderr: '' });
@@ -568,6 +604,20 @@ describe('the build script', () => {
     } finally {
       box.remove();
     }
+  });
+});
+
+describe("Cloudflare Pages' _routes.json", () => {
+  it('names the API’s addresses under the base path, and nothing else', () => {
+    expect(routesFor('')).toBe('{"version":1,"include":["/api/*"],"exclude":[]}\n');
+    expect(JSON.parse(routesFor('/sudokuoku'))).toEqual({ version: 1, include: ['/sudokuoku/api/*'], exclude: [] });
+  });
+
+  it('runs the entry the repository holds, the kit’s with this app’s catalogue', () => {
+    // functions/api/[[path]].js answers /api/*: a build for a sub-path on Cloudflare Pages moves
+    // it under that path (server/kit/README.md, "Cloudflare Pages"), which the README says.
+    expect(read('functions/api/[[path]].js')).toContain("export const onRequest = pagesHandler(catalogue);");
+    expect(read('README.md')).toMatch(/functions\/sudokuoku\/api\/\[\[path\]\]\.js/);
   });
 });
 

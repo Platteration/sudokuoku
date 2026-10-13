@@ -16,6 +16,16 @@
  * style-src's 'unsafe-inline'. Then it breaks the page on purpose to see the safety net
  * (public/guard.js) and the no-JavaScript note, and reads the 404 page.
  *
+ * The host above runs no API, as GitHub Pages and Netlify run none: every load asks api/config
+ * once, is answered 404 (Chromium's one console line for it is the one console error excused),
+ * and draws no sign-in and no shop. Then the same site is served with its sign-in and shop API
+ * beside it (server/kit with server/catalogue.js, as Cloudflare Pages runs
+ * functions/api/[[path]].js), its Google and Stripe the fakes of server/fakes.mjs handed to the
+ * kit as its `fetch`, and the whole flow is played under the site's policy: sign in (Google's
+ * authorize page answered by page.route with the redirect back to the callback), Support this app
+ * (Checkout answered the same way), Stripe's signed webhook (and a forged one refused), the
+ * thanks, sign out, sign in again, delete the account, a sign-in that fails, a cancelled Checkout.
+ *
  *   npm run test:e2e
  */
 import { spawnSync } from 'node:child_process';
@@ -27,11 +37,26 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 import { headersFor, metaPolicy } from '../scripts/headers.mjs';
+import catalogue from '../server/catalogue.js';
+import { createFakes, envFor, signedDelivery } from '../server/fakes.mjs';
+import { createNodeHandler } from '../server/kit/node.js';
+import { createMemoryStore } from '../server/kit/store.js';
 import { serveSite } from './serve.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = '/sudokuoku';
 const OUT = join(root, '.web-build');
+
+/** A string constant's value, read out of the TypeScript source the bundle was built from. */
+function constant(file, name) {
+  const m = new RegExp(`export const ${name} =\\s*(?:'([^']+)'|"([^"]+)")`).exec(readFileSync(join(root, file), 'utf8'));
+  if (!m) throw new Error(`${file} exports no string ${name}`);
+  return m[1] ?? m[2];
+}
+/** What About says leaves the device: on a site with no api/, and on one that offers sign-in (src/about.ts). */
+const PRIVACY_WEB = constant('src/about.ts', 'PRIVACY_WEB');
+const PRIVACY_WITH_ACCOUNT = constant('src/about.ts', 'PRIVACY_WITH_ACCOUNT');
+const SUPPORTER_THANKS = constant('src/about.ts', 'SUPPORTER_THANKS');
 
 const failures = [];
 const check = (label, ok, detail = '') => {
@@ -69,7 +94,7 @@ const SITE = [
   /^_expo\/static\/js\/web\/index-[0-9a-f]{32}\.js$/,
   /^assets\/node_modules\/@expo\/vector-icons\/[\w/-]+\/Ionicons\.[0-9a-f]{32}\.ttf$/,
 ];
-const HOSTING = ['_headers', '_redirects', '.htaccess'];
+const HOSTING = ['_headers', '_redirects', '.htaccess', '_routes.json'];
 check(
   'the build holds the site and the hosting files, and nothing else',
   files.every((f) => HOSTING.includes(f) || SITE.some((p) => p.test(f))) && SITE.every((p) => files.some((f) => p.test(f))) && HOSTING.every((f) => files.includes(f)),
@@ -95,6 +120,10 @@ check(
 check(
   'the error pages Apache shows are under the base path',
   readFileSync(join(OUT, '.htaccess'), 'utf8').match(/^ErrorDocument .*$/gm)?.join('|') === 'ErrorDocument 404 /sudokuoku/404.html|ErrorDocument 403 /sudokuoku/404.html'
+);
+check(
+  "Cloudflare Pages' _routes.json runs the API for the API's addresses under the base path, and for nothing else",
+  readFileSync(join(OUT, '_routes.json'), 'utf8') === '{"version":1,"include":["/sudokuoku/api/*"],"exclude":[]}\n'
 );
 
 // --- the host -----------------------------------------------------------------------------
@@ -144,11 +173,23 @@ const browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${LAN}
 let current = null;
 
 /**
+ * How many times a page was answered 404 for its own api/config, on the hosts that run no API:
+ * Chromium logs each as a console error, the one console error excused (see `open`).
+ */
+const probes = { count: 0 };
+
+/**
  * A page whose every policy report, uncaught error, console error and request outside the site
  * lands in `seen`. Violations are reported through a binding, so a report made just before a
- * navigation is not lost with the page.
+ * navigation is not lost with the page. `leaves` lists the outside addresses the page may
+ * navigate to (Google's authorize page, Stripe's Checkout), each answered by page.route in the
+ * browser and never sent; they land in `seen.left`.
+ *
+ * The one console error excused is Chromium's line for the page's own api/config when it is a
+ * 404, as it is on every host that runs no API: matched by the address it is reported at, not by
+ * its words, and counted in `probes`.
  */
-async function open(context, seen, at = origin) {
+async function open(context, seen, at = origin, leaves = []) {
   await context.exposeBinding('__violation', (_source, text) => seen.violations.push(text));
   await context.addInitScript(() => {
     document.addEventListener('securitypolicyviolation', (e) => {
@@ -160,11 +201,18 @@ async function open(context, seen, at = origin) {
   page.on('pageerror', (e) => seen.errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     const text = m.text();
+    if (m.type() === 'error' && m.location().url === `${at}${BASE}/api/config` && /the server responded with a status of 404/.test(text)) {
+      probes.count += 1;
+      return;
+    }
     if (m.type() === 'error') seen.errors.push(`console.error: ${text.slice(0, 300)} @ ${m.location().url}`);
     else if (/Content.Security.Policy|Trusted.Type|Permissions.Policy|Refused to/i.test(text)) seen.violations.push(`console: ${text.slice(0, 300)}`);
   });
   page.on('request', (r) => {
-    if (!r.url().startsWith(`${at}${BASE}/`)) seen.outside.push(r.url());
+    const url = r.url();
+    if (url.startsWith(`${at}${BASE}/`)) return;
+    if (r.isNavigationRequest() && leaves.some((prefix) => url.startsWith(prefix))) seen.left.push(url);
+    else seen.outside.push(url);
   });
   page.on('dialog', async (d) => {
     seen.dialogs.push(`${d.type()}: ${d.message()}`);
@@ -174,7 +222,7 @@ async function open(context, seen, at = origin) {
 }
 
 /** What a page reported. Its dialogs are accepted, or dismissed while `decline` is set. */
-const fresh = () => ({ violations: [], errors: [], outside: [], dialogs: [], decline: false });
+const fresh = () => ({ violations: [], errors: [], outside: [], left: [], dialogs: [], decline: false });
 const settle = (page, ms = 400) => page.waitForTimeout(ms);
 /** Whether `test` comes true within `ms`, polled: what the page shows next is not on a fixed clock. */
 const until = async (page, test, ms = 5000) => {
@@ -292,6 +340,18 @@ try {
   await conflicts.click();
   await settle(page);
   check('a setting switches', (await conflicts.getAttribute('aria-checked')) !== before);
+  // This host runs no API, as GitHub Pages and Netlify run none: api/config was a 404, and the
+  // account and the shop do not exist here. About says what is true of the page instead.
+  const settingsText = await bodyText(page);
+  check(
+    'with no API on the host, Settings draws no sign-in and no shop, and About says the games stay in the browser',
+    settingsText.includes(PRIVACY_WEB) &&
+      !settingsText.includes(PRIVACY_WITH_ACCOUNT) &&
+      (await button(page, 'Sign in with Google').count()) === 0 &&
+      (await button(page, 'Sign in to buy').count()) === 0 &&
+      !/Support this app|Signed in/i.test(settingsText),
+    settingsText.slice(-400)
+  );
   await button(page, 'Reset to defaults').click();
   await settle(page, 600);
   check('Reset to defaults asks first, in the browser', seen.dialogs.some((d) => d.startsWith('confirm: Reset settings?')));
@@ -354,6 +414,11 @@ try {
   check('and starts one', await until(page, async () => (await stat(page, 'Moves')) === 0));
 
   check('the safety net stays out of the way of a working app', await page.locator('#startup-failed').isHidden());
+  check(
+    'with no API on the host, each load asked api/config once, and nothing more of api/',
+    site.apiRequests.length >= 3 && site.apiRequests.every((r) => r === `GET ${BASE}/api/config`) && site.apiRequests.length === probes.count,
+    `${site.apiRequests.join(', ')}; ${probes.count} 404 lines`
+  );
   report('the game', seen);
   await context.close();
 
@@ -626,6 +691,197 @@ try {
     await context.close();
   }
 
+  // The site with its sign-in and shop API beside it, as Cloudflare Pages serves it with
+  // functions/api/[[path]].js: server/kit with this app's catalogue, answering <base>/api/*, its
+  // Google and Stripe the fakes it is handed as its fetch. APP_URL is this host's own address, as
+  // on a deployment. The whole flow, under the site's policy, as a visitor on a phone.
+  {
+    const fakes = await createFakes();
+    let handler = null;
+    const shop = await serveSite({ dir: OUT, base: BASE, api: (req, res) => handler(req, res) });
+    const shopHome = `${shop.origin}${BASE}/`;
+    const logs = [];
+    handler = createNodeHandler({ catalogue, env: envFor(shopHome), store: createMemoryStore(), fetch: fakes.fetch, log: (level, message) => logs.push(`${level}: ${message}`) });
+    check('the API beside the site has sign-in and the shop on', handler.features.signIn && handler.features.shop);
+    const apiConfig = await fetch(`${shopHome}api/config`);
+    check(
+      "api/ answers with the API's own headers, not the site's",
+      apiConfig.headers.get('content-security-policy') === "default-src 'none'; frame-ancestors 'none'; base-uri 'none'" &&
+        apiConfig.headers.get('referrer-policy') === 'no-referrer' &&
+        apiConfig.headers.get('x-content-type-options') === 'nosniff' &&
+        apiConfig.headers.get('cross-origin-resource-policy') === 'same-origin' &&
+        apiConfig.headers.get('cache-control') === 'public, max-age=60' &&
+        !apiConfig.headers.has('permissions-policy'),
+      [...apiConfig.headers].map(([name, value]) => `${name}: ${value}`).join(' | ')
+    );
+
+    const GOOGLE = 'https://accounts.google.com/o/oauth2/v2/auth?';
+    const CHECKOUT = 'https://checkout.stripe.com/c/pay/';
+    const seen = fresh();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'en-GB' });
+    const page = await open(context, seen, shop.origin, [GOOGLE, CHECKOUT]);
+    // Google's side. Playwright routes no redirect's target, so the browser would follow the kit's
+    // 302 to accounts.google.com for real: the kit's own answer to api/auth/google/start, its
+    // sign-in cookie included, reaches the browser as a Refresh to the same address instead. The
+    // browser then navigates to Google's authorize URL itself, and the route below answers it as
+    // Google does, with a 302 to the callback (fakes.consent checks the URL as Google would), or
+    // with Google's error=access_denied when refusing. The callback arrives from that cross-site
+    // hop, as it does from Google, so the cookie's SameSite is what a real sign-in meets.
+    const answered = [];
+    const startProblems = [];
+    let refuse = false;
+    await page.route(
+      (url) => url.href.startsWith(`${shopHome}api/auth/google/start?`),
+      async (route) => {
+        const response = await route.fetch({ maxRedirects: 0 });
+        const { location = '', ...headers } = response.headers();
+        if (response.status() !== 302 || !location.startsWith(GOOGLE)) startProblems.push(`${response.status()} ${location}`);
+        await route.fulfill({ status: 200, headers: { ...headers, refresh: `0;url=${location}` }, body: '' });
+      }
+    );
+    await page.route('https://accounts.google.com/**', async (route) => {
+      const url = route.request().url();
+      answered.push(url);
+      let back;
+      if (refuse) {
+        const asked = new URL(url).searchParams;
+        back = new URL(asked.get('redirect_uri'));
+        back.searchParams.set('error', 'access_denied');
+        back.searchParams.set('state', asked.get('state'));
+      } else {
+        back = fakes.consent(url, { sub: '1001', email: 'ada@example.com' });
+      }
+      await route.fulfill({ status: 302, headers: { location: back.href } });
+    });
+    // Stripe's side: Checkout, paid at once, sends the visitor back to the success_url.
+    const checkouts = [];
+    await page.route('https://checkout.stripe.com/**', (route) => {
+      const url = route.request().url();
+      answered.push(url);
+      checkouts.push(url);
+      return route.fulfill({ status: 302, headers: { location: `${shopHome}?purchase=success` } });
+    });
+
+    const text = (t) => page.getByText(t, { exact: true });
+    const onGame = () => page.getByText('Shifts', { exact: true }).waitFor({ timeout: 15000 });
+    const openSettings = async () => {
+      await button(page, 'Settings').click();
+      await button(page, 'Reset to defaults').waitFor();
+    };
+    /** Presses `name`, waits for the page to leave through `through` and to load again at `back`. */
+    const leaveAndReturn = async (name, through, back = shopHome) => {
+      const left = page.waitForRequest((r) => r.url().startsWith(through), { timeout: 15000 });
+      const returned = page.waitForRequest((r) => r.url() === back && r.isNavigationRequest(), { timeout: 15000 });
+      await button(page, name).click();
+      await left;
+      await returned;
+      await page.waitForLoadState('load');
+      await onGame();
+    };
+    const callback = `${shopHome}api/auth/google/callback`;
+    const thanked = async () => (await text(SUPPORTER_THANKS).count()) === 1;
+    /** The webhook Stripe sends once the Checkout Session `url` names is paid, signed with `secret`. */
+    const deliver = (delivery) =>
+      fetch(`${shopHome}api/webhooks/stripe`, { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': delivery.signature }, body: delivery.body });
+
+    try {
+      await page.goto(shopHome, { waitUntil: 'load' });
+      await page.getByText('How Sudokuoku works').waitFor({ timeout: 15000 });
+      await closeSheet(page, 'How Sudokuoku works');
+      await openSettings();
+      await button(page, 'Sign in with Google').waitFor();
+      check(
+        'a site that offers sign-in: Settings shows the Account and Support this app, priced, and Sign in to buy',
+        (await text('Account').count()) === 1 &&
+          (await text('Support this app').count()) === 1 &&
+          (await text('€3.00').count()) === 1 &&
+          (await button(page, 'Sign in to buy').count()) === 1 &&
+          (await button(page, 'Buy').count()) === 0 &&
+          !(await thanked())
+      );
+      check('and About says what signing in and paying tell the site', (await text(PRIVACY_WITH_ACCOUNT).count()) === 1);
+
+      await leaveAndReturn('Sign in to buy', callback);
+      await openSettings();
+      await text('Signed in as ada@example.com').waitFor();
+      check('signed in with Google, the visitor is named, and nothing is held yet', (await button(page, 'Buy').count()) === 1 && !(await thanked()));
+
+      await leaveAndReturn('Buy', CHECKOUT, `${shopHome}?purchase=success`);
+      check('Buy leaves for Stripe’s Checkout, once, and comes back', checkouts.length === 1, checkouts.join(' | '));
+      check('back from Checkout, the page takes ?purchase=success out of its address', await until(page, async () => (await page.evaluate(() => location.search)) === ''), page.url());
+      // Back from Checkout nothing is granted: only Stripe's signed word grants it, and one signed
+      // with another secret is refused.
+      const forged = await deliver(signedDelivery(fakes.paid(checkouts[0]), { secret: 'whsec_notThisEndpointsSecret00' }));
+      const signed = await deliver(signedDelivery(fakes.paid(checkouts[0])));
+      check('a webhook signed with another secret is refused, and Stripe’s is taken', forged.status === 400 && signed.status === 200, `${forged.status} ${signed.status}`);
+      // The page asks api/me until the payment shows, then says so at the top of the game.
+      const thanks = await text('Thank you — Support this app is unlocked.').waitFor({ timeout: 20000 }).then(
+        () => true,
+        () => false
+      );
+      check('the page asks again until the support shows, and thanks the visitor once it does', thanks);
+      await button(page, 'Dismiss').click();
+      check('Dismiss takes the notice away', await until(page, async () => (await page.getByRole('alert').count()) === 0));
+      await openSettings();
+      await text(SUPPORTER_THANKS).waitFor();
+      check('About thanks the supporter, and the support shows Owned', (await text('Owned').count()) === 1 && (await button(page, 'Buy').count()) === 0);
+
+      // Signing out takes the thanks away; the support is the account's, so signing in brings it back.
+      await button(page, 'Sign out').click();
+      await button(page, 'Sign in with Google').waitFor();
+      check('Sign out signs out, and the thanks goes with it', !(await thanked()));
+      await leaveAndReturn('Sign in with Google', callback);
+      await openSettings();
+      await text(SUPPORTER_THANKS).waitFor();
+      check('signed in again, the support is still the account’s', true);
+
+      // Deleting the account takes the support with it, after asking.
+      const asked = seen.dialogs.length;
+      await button(page, 'Delete account').click();
+      await button(page, 'Sign in with Google').waitFor();
+      check(
+        'Delete account asks first, says what goes with it, and deletes',
+        seen.dialogs.length === asked + 1 && /^confirm: Delete account\?\n\nThis deletes your account on this site, and your support with it/.test(seen.dialogs[asked] ?? '') && !(await thanked()),
+        seen.dialogs.slice(asked).join(' | ')
+      );
+      await leaveAndReturn('Sign in with Google', callback);
+      await openSettings();
+      await text('Signed in as ada@example.com').waitFor();
+      check('signed in after deleting, nothing is held', (await button(page, 'Buy').count()) === 1 && !(await thanked()));
+
+      // A sign-in Google refuses comes back to the site, which says so once and cleans the address.
+      await button(page, 'Sign out').click();
+      await button(page, 'Sign in with Google').waitFor();
+      refuse = true;
+      await leaveAndReturn('Sign in with Google', callback, `${shopHome}?signin=failed`);
+      await text("Sign-in didn't complete.").waitFor();
+      check('a sign-in that did not complete says so, and leaves the address clean', (await page.evaluate(() => location.search)) === '');
+      await button(page, 'Dismiss').click();
+      check('and Dismiss takes it away', await until(page, async () => (await text("Sign-in didn't complete.").count()) === 0));
+      // A cancelled Checkout only cleans the address.
+      await page.goto(`${shopHome}?purchase=cancelled`, { waitUntil: 'load' });
+      await onGame();
+      check(
+        'a cancelled Checkout says nothing, and leaves the address clean',
+        (await until(page, async () => (await page.evaluate(() => location.search)) === '')) && (await page.getByRole('alert').count()) === 0
+      );
+    } finally {
+      await context.close();
+    }
+    // Every page that left the site went to Google's authorize URL or Stripe's Checkout, each
+    // answered in the browser; nothing reached either, and the fakes were asked nothing else.
+    check('the kit sent the browser to Google’s authorize URL each time', startProblems.length === 0, startProblems.join(' | '));
+    check(
+      'the page left the site only for Google and Checkout, each answered in the browser',
+      JSON.stringify(seen.left) === JSON.stringify(answered) && answered.filter((u) => u.startsWith(GOOGLE)).length === 4 && checkouts.length === 1,
+      seen.left.join(' | ')
+    );
+    check('the fakes were asked nothing they do not serve, and the kit warned of nothing', fakes.unexpected.length === 0 && logs.length === 0, [...fakes.unexpected, ...logs].join(' | '));
+    check('the webhook reached the API', shop.apiRequests.includes(`POST ${BASE}/api/webhooks/stripe`));
+    report('sign-in and support', seen, shop);
+    await shop.close();
+  }
+
   // A host that sends no headers (GitHub Pages sends none of these), over plain http, at a name
   // that is not loopback: a LAN preview of the built folder, or a host before its certificate.
   // The pages' <meta> is the whole policy there. With upgrade-insecure-requests in it the browser
@@ -649,6 +905,12 @@ try {
       () => false
     );
     check('and there the game draws, every request answered', drew && failed.length === 0, failed.join(' | '));
+    await settle(page, 800);
+    check(
+      'and there, with no API, the page asked api/config once and drew no sign-in',
+      JSON.stringify(bare.apiRequests) === JSON.stringify([`GET ${BASE}/api/config`]) && !(await bodyText(page)).includes('Sign in with Google'),
+      bare.apiRequests.join(', ')
+    );
     report('plain http with no headers', seen, bare);
     await context.close();
     await bare.close();

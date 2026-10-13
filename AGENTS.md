@@ -143,11 +143,15 @@ config --type introspect` and asserts the merged result, so app.json states ever
 the test pins even at its default. SDK 57 dropped the top-level `splash` block and
 `expo-splash-screen`'s plugin no-ops without props, so the splash lives only in
 `plugins`; `userInterfaceStyle: automatic` reaches Android only through
-`expo-system-ui`, which is a dependency for that reason. The app has no network code
-(Share result is the system share sheet) — the test reads the source for it: no socket
-API, no image drawn from a `uri`, and none of the packages that open one for you
+`expo-system-ui`, which is a dependency for that reason. The iOS and Android apps have no
+network code (Share result is the system share sheet) — the test reads the source for it: no
+socket API, no image drawn from a `uri`, and none of the packages that open one for you
 (expo-updates, expo-network, expo-web-browser, react-native-webview), leaving
-`Linking.openURL(SOURCE_URL)` as the one URL the app hands out. So
+`Linking.openURL(SOURCE_URL)` as the one URL the app hands out. The scan sets aside exactly one
+file, `src/accountClient.web.ts`, the website's sign-in and shop client (CLAUDE.md), which Metro
+bundles into the web build alone; the test pins what that file may reach (the site's own `api/`
+and Stripe Checkout's origin), holds its native twin `src/accountClient.ts` inert, and asks
+Metro's own resolver which of the two each platform gets. So
 `android.blockedPermissions` strips INTERNET, the storage/media set and
 SYSTEM_ALERT_WINDOW from the shipped build (VIBRATE, for expo-haptics, is all that
 remains) and `plugins/withDebugInternet.js` (copied
@@ -196,8 +200,10 @@ with `experiments.baseUrl` in front. A sub-path build is `WEB_BASE_PATH=/sudokuo
 build:web`: `app.config.js` turns the variable into `experiments.baseUrl` for that run and
 otherwise returns `app.json` untouched (the object itself, which `website.test.ts` pins, so no
 native build sees a difference), and `scripts/build-web.mjs` prefixes the site-absolute URLs in
-`public/`'s two pages and Apache's `ErrorDocument` lines, which Expo leaves alone, and removes
-Expo's `metadata.json`, which the page never reads. `.github/workflows/pages.yml` publishes that
+`public/`'s two pages and Apache's `ErrorDocument` lines, which Expo leaves alone, removes
+Expo's `metadata.json`, which the page never reads, and writes Cloudflare Pages' `_routes.json`
+(`<base>/api/*`, so only the sign-in and shop API's addresses run the site's one Function;
+CLAUDE.md). `.github/workflows/pages.yml` publishes that
 build to GitHub Pages with `WEB_BASE_PATH=/<repository>` after `npm ci`, the type check and the
 unit tests, on a push to `main` (which does not exist yet) or by hand; its shape is the
 conventions test's. The host does the under-the-hood work: one
@@ -212,12 +218,16 @@ its error overlay, which writes HTML from strings, breaks the dev page (measured
 `src/__tests__/website.test.ts` holds every copy equal and the cache rules of the three hosts to
 one sample of paths. It reads `deploy/nginx.conf` block by block, as nginx does: every
 `add_header` is the https server's own and none is in a location, since a location that adds one
-header inherits none of the server's, and Cache-Control is checked through the header the server
-actually sends. nginx and Apache serve the site's own addresses and nothing else (an allow-list
+header inherits none of the server's, but for the one stated exception, `location ^~ /api/`,
+which proxies the sign-in and shop API (which sends its own headers) and whose one `add_header`
+is the server block's Strict-Transport-Security line as written there; Cache-Control is checked
+through the header the server actually sends. nginx and Apache serve the site's own addresses and nothing else (an allow-list
 of the page, the 404 page, the safety net, the icon, robots.txt, security.txt, the hashed bundle
 and font, and ACME's `.well-known/acme-challenge/`), and the test walks the sample and every
-`git ls-files` path through both; Netlify can only refuse by name, so `_redirects` names the
-hosting files and `metadata.json` with `404!` (a plain rule does not apply where a file exists).
+`git ls-files` path through both (nginx hands `/api/` to the API; `.htaccess` cannot proxy, so
+Apache answers it 404 unless the virtual host has the `ProxyPass` its header names); Netlify can
+only refuse by name, so `_redirects` names the hosting files, `_routes.json` and `metadata.json`
+with `404!` (a plain rule does not apply where a file exists).
 `deploy/nginx.conf` needs nginx 1.25.1 for `http2 on;` and says what to write on an older one.
 Every value is measured
 by `npm run test:e2e`, which builds for `/sudokuoku`, serves the folder with the headers exactly
@@ -229,10 +239,14 @@ a hash would differ per deployment path and per icon font and the hand-kept copi
 follow it. react-native-web's stylesheet is empty and filled through `insertRule` (the
 empty-string hash covers it) and index.html's reset is fixed text; the suite serves the page with
 the empty-string hash in place of `'unsafe-inline'` and checks that those two texts are all it
-refuses. Nothing needs an inline script, eval, a
-`data:`/`blob:` source or a connection, and Trusted Types hold (`require-trusted-types-for
+refuses. Nothing needs an inline script, eval or a
+`data:`/`blob:` source, and Trusted Types hold (`require-trusted-types-for
 'script'; trusted-types 'none'`), since React and react-native-web build the DOM with DOM
-calls. A `Permissions-Policy` feature Chromium does not know is a console warning that fails the
+calls. `connect-src` is `'self'` for the site's own `api/` and nothing else (the sign-in and
+shop, CLAUDE.md): with `'none'` the page's `api/config` is refused and reported, so no sign-in
+could ever be drawn (measured); Google and Stripe are top-level navigations, which it does not
+govern. On a host that runs no API, that `api/config` is a 404, and Chromium's console line for
+it is the one console error the suite excuses, by its address, counting one per load. A `Permissions-Policy` feature Chromium does not know is a console warning that fails the
 suite (`web-share`, `bluetooth` and `ambient-light-sensor` are unknown to Linux Chromium), so
 only features it recognises are listed, and every one it recognises is, off but for
 `clipboard-read` and `clipboard-write`: the suite reads `document.featurePolicy.allowedFeatures()`
@@ -267,7 +281,13 @@ confirmation goes through `src/confirm.ts`, because react-native-web's `Alert.al
 no-op. Reset to defaults is confirmed and puts back `SHARED_SETTING_KEYS` only, keeping
 `seenIntro`. The About card's text is in `src/about.ts` and its version comes from
 `expo-constants` (`Constants.expoConfig.version`, so app.json); its source link is the one
-URL in the app, handed to the system browser through `Linking.openURL`, which
-`appConfig.test.ts` pins along with the absence of any network code. The palettes are in
+URL the app hands out, to the system browser through `Linking.openURL`, which
+`appConfig.test.ts` pins along with the absence of any network code outside the website's
+account client. Its privacy line is one of three in `src/about.ts`, chosen by `accountView`
+(`src/accountModel.ts`): the apps' "no network code", the website's when its host offers no
+sign-in, and the website's when it does, which says what Google tells the site, what Stripe
+handles and what the site keeps. On the website a supporter is thanked there too
+(`SUPPORTER_THANKS`); the account and support cards sit between Reset to defaults and About,
+drawn only when the site's `api/config` says so. The palettes are in
 `src/palette.ts`, free of React Native so `palette.test.ts` can hold every pack to WCAG AA;
 `theme.tsx` re-exports them and resolves a null system scheme to dark.

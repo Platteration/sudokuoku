@@ -17,8 +17,10 @@
  * headers (it is kept out of the template, which the dev server serves too); prefixes the URLs
  * that public/'s own pages and Apache's error pages write, which Expo does not touch; removes
  * metadata.json, Expo's manifest for update servers, which the page never reads and so is not
- * part of the site; and fails when a hosting file did not arrive, so an SDK that stopped copying
- * one breaks the build rather than a deploy.
+ * part of the site; writes _routes.json, which tells Cloudflare Pages to run the site's one
+ * Function (functions/api/[[path]].js, the sign-in and shop API of server/kit) for `<base>/api/*`
+ * and for nothing else, so a static file never invokes it; and fails when a hosting file did not
+ * arrive, so an SDK that stopped copying one breaks the build rather than a deploy.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,6 +34,16 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** What every build publishes beside the app, all of it from public/. */
 export const HOSTING_FILES = ['_headers', '_redirects', '.htaccess', '404.html', 'robots.txt', '.well-known/security.txt', 'guard.js'];
+
+/**
+ * Cloudflare Pages' _routes.json for a site under `base` ('' at a domain's root): the site's
+ * Function runs for the API's addresses alone, and every other request is a static file. The
+ * other hosts ignore it, and their configurations refuse it (_redirects, and the allow-lists of
+ * .htaccess and deploy/nginx.conf).
+ */
+export function routesFor(base) {
+  return `${JSON.stringify({ version: 1, include: [`${base}/api/*`], exclude: [] })}\n`;
+}
 
 /** The pages public/ supplies: they get the policy, and the base path in their site-absolute URLs. */
 const PAGES = ['index.html', '404.html'];
@@ -108,6 +120,7 @@ function main() {
   const missing = HOSTING_FILES.filter((f) => !existsSync(join(out, f)));
   if (missing.length > 0) throw new Error(`the export left out ${missing.join(', ')}: expo export no longer copies public/ whole`);
   rmSync(join(out, 'metadata.json'), { force: true });
+  writeFileSync(join(out, '_routes.json'), routesFor(base));
   const policy = metaPolicy(readFileSync(join(out, '_headers'), 'utf8'));
   for (const page of PAGES) {
     const file = join(out, page);

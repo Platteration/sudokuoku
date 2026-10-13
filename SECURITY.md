@@ -27,8 +27,16 @@ responses, user-supplied text rendered into a page).
 On the website (the web build, `npm run build:web`) that includes:
 
 - a way to run script, or load anything, that the Content Security Policy in
-  `public/_headers` should forbid, or a request the site makes to anywhere at
-  all (the policy's `connect-src` is `'none'`: the game has no network code);
+  `public/_headers` should forbid, or a request the site makes to anywhere but
+  its own `api/` (the policy's `connect-src` is `'self'`: the game has no
+  network code, and the page asks only its own site's sign-in and shop API);
+- the sign-in and "Support this app" API (`server/kit/`, `server/catalogue.js`,
+  `functions/api/[[path]].js`, `server/start.mjs`): a way to be signed in as
+  someone else, to keep a session past sign-out or account deletion, to be
+  granted the support without Stripe's signed webhook, or to make the page
+  navigate anywhere but Google's sign-in, Stripe's Checkout or this site. The
+  kit is shared by several apps and copied verbatim, so a fix is made to its
+  canonical copy; report it here all the same;
 - a challenge code, link or saved game that breaks the page for the next visit;
 - hosting settings in `public/_headers`, `public/_redirects`, `public/.htaccess`
   or `deploy/nginx.conf` that are wrong or incomplete, such as a file served

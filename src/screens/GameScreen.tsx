@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AccountNotice from '../components/AccountNotice';
 import Board from '../components/Board';
 import IconButton from '../components/ui/IconButton';
 import Controls from '../components/Controls';
@@ -645,6 +646,8 @@ function GameView({
           <IconButton name="add" label="New game" onPress={confirmNewGame} />
         </View>
       </View>
+
+      <AccountNotice />
 
       <View style={styles.statsRow}>
         <Stat label="Time" value={formatTime(state.elapsed)} />

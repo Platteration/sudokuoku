@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { APP_NAME, LICENCE, PRIVACY, SOURCE_URL, TAGLINE, appVersion } from '../about';
+import { APP_NAME, LICENCE, PRIVACY, PRIVACY_WEB, PRIVACY_WITH_ACCOUNT, SOURCE_URL, SUPPORTER_THANKS, TAGLINE, appVersion } from '../about';
 import { DEFAULT_SETTINGS } from '../engine';
 import { KEYS, LEGACY_KEYS } from '../storage';
 import { SETTING_VALUES, SHARED_SETTING_KEYS } from '../utils/saved';
@@ -115,6 +115,15 @@ describe('the About card', () => {
     // The privacy line is a claim about the code; appConfig.test.ts holds
     // the source to it (no network code, no URL but this one).
     expect(PRIVACY).toMatch(/^Nothing leaves your device/);
+    // ...and on the website, the line for a site with no sign-in, and the one
+    // for a site with it, which says what signing in and paying hand over.
+    expect(PRIVACY_WEB).toMatch(/^Nothing leaves your device/);
+    expect(PRIVACY_WEB).not.toMatch(/network code/);
+    expect(PRIVACY_WITH_ACCOUNT).toMatch(/^Nothing leaves your device unless you sign in or buy\. /);
+    for (const fact of ['an account id and your email address', 'Stripe', "Stripe's customer id", 'what was bought']) {
+      expect(PRIVACY_WITH_ACCOUNT).toContain(fact);
+    }
+    expect(SUPPORTER_THANKS).toBe(`Thank you for supporting ${APP_NAME}.`);
   });
 
   it('shows the configured version, and a placeholder that cannot pass for one', () => {
@@ -218,6 +227,24 @@ describe('the screens', () => {
     expect(sheet).toMatch(/accessibilityRole="switch"/);
     expect(sheet).toMatch(/aria-checked=\{value\}/);
     expect((sheet.match(/aria-selected=\{active\}/g) ?? []).length).toBe(2); // presets, packs
+  });
+
+  it('draws the website’s account and support between Reset to defaults and About, and About’s lines from accountView', () => {
+    const sheet = read('src/components/SettingsSheet.tsx');
+    const at = (text: string) => {
+      const i = sheet.indexOf(text);
+      expect(i, text).toBeGreaterThan(-1);
+      return i;
+    };
+    const order = [at('label="Reset to defaults"'), at('{view.account ? ('), at('{view.support ? ('), at('<Text style={styles.section}>About</Text>')];
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(sheet).toMatch(/<Text style=\{styles\.aboutText\}>\{view\.privacy\}<\/Text>/);
+    expect(sheet).toMatch(/\{view\.thanks \? <Text style=\{styles\.thanks\}>\{view\.thanks\}<\/Text> : null\}/);
+    expect(sheet).toMatch(/const view = accountView\(account\.state, Platform\.OS === 'web'\);/);
+    // Deleting the account is confirmed like every other loss, through confirm.ts.
+    expect(sheet).toMatch(/confirmAction\(\{\s*title: ACCOUNT_NOTES\.deleteTitle,/);
+    expect(sheet).toMatch(/<PrimaryButton label=\{WORDS\.deleteAccount\}[^>]*onPress=\{onDeleteAccount\} \/>/);
+    expect(sheet).toMatch(/onConfirm: \(\) => run\(account\.deleteAccount, setAccountNote\),/);
   });
 
   it('hands the source link to the browser as a link on the web, and to the OS on a device', () => {

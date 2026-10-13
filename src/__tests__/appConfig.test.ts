@@ -13,8 +13,10 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SOURCE_URL } from '../about';
+import { accountClient } from '../accountClient';
+import { NO_LANDING } from '../accountModel';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -75,27 +77,42 @@ const manifestsUnder = (dir: string): string[] => {
 
 /**
  * The app's own code: everything under src/ that is not a test, plus the entry files and the
- * one script the website loads beside the bundle, its safety net.
+ * one script the website loads beside the bundle, its safety net. Each as [path from the root,
+ * source].
  */
-const appSource = (): string => {
-  const sources: string[] = [];
+const appSources = (): [string, string][] => {
+  const sources: [string, string][] = [];
   const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== '__tests__') walk(full);
       } else if (/\.tsx?$/.test(entry.name)) {
-        sources.push(fs.readFileSync(full, 'utf8'));
+        sources.push([path.relative(root, full), fs.readFileSync(full, 'utf8')]);
       }
     }
   };
   walk(path.join(root, 'src'));
   for (const file of ['App.tsx', 'index.ts', 'public/guard.js']) {
-    sources.push(fs.readFileSync(path.join(root, file), 'utf8'));
+    sources.push([file, fs.readFileSync(path.join(root, file), 'utf8')]);
   }
   expect(sources.length).toBeGreaterThan(10); // the walk found the app
-  return sources.join('\n');
+  return sources;
 };
+const appSource = (): string => appSources().map(([, code]) => code).join('\n');
+
+/**
+ * The website's sign-in and "Support this app" client (README, "Sign-in and Support this app"):
+ * the one module of the app that talks to a network, and to the site's own api/ alone. Metro
+ * bundles a `.web.ts` file into the web build only; a native build resolves its twin,
+ * accountClient.ts, which the tests below hold inert. Named one by one, so a second `.web` module
+ * is scanned like any other file and a socket in it is still a finding. (server/ and functions/,
+ * the API the website's host runs, are not the app's code and are not bundled: nothing the app
+ * holds imports them, which the tests below check too.)
+ */
+const WEB_ONLY = [path.join('src', 'accountClient.web.ts')];
+/** What opens a socket from the app's own code, and the packages that open one for you. */
+const NETWORK = /\bfetch\(|axios|XMLHttpRequest|WebSocket|EventSource|openBrowserAsync|\bWebView\b/;
 
 describe('splash screen', () => {
   const SPLASH = {
@@ -269,14 +286,20 @@ describe('Android permissions', () => {
     // other processes with their own permission, and neither opens a socket
     // of this app's own. So the only URL in the source is that one, and the
     // only thing it is handed to is Linking.openURL.
-    const source = appSource();
+    //
+    // The website's account client is the one file set aside (WEB_ONLY): a
+    // phone never gets it, and the tests after this one hold what it may reach.
+    const sources = appSources();
+    for (const file of WEB_ONLY) expect(sources.map(([f]) => f)).toContain(file);
+    const source = sources
+      .filter(([file]) => !WEB_ONLY.includes(file))
+      .map(([, code]) => code)
+      .join('\n');
     // The APIs that open a socket, and the packages that open one for you:
     // expo-network reads the connection, expo-web-browser and
     // react-native-webview each embed a browser, and expo-updates fetches a
     // new bundle at launch. None of them is a dependency either.
-    expect(source).not.toMatch(
-      /\bfetch\(|axios|XMLHttpRequest|WebSocket|EventSource|openBrowserAsync|\bWebView\b/
-    );
+    expect(source).not.toMatch(NETWORK);
     expect(source).not.toMatch(/expo-updates|expo-network|expo-web-browser|react-native-webview/);
     for (const name of ['expo-updates', 'expo-network', 'expo-web-browser', 'react-native-webview']) {
       expect(pkg.dependencies[name], name).toBeUndefined();
@@ -287,7 +310,101 @@ describe('Android permissions', () => {
     expect(source).not.toMatch(/\buri:/);
     const urls = [...source.matchAll(/https?:\/\/[^\s'"`)]+/g)].map((m) => m[0]);
     expect([...new Set(urls)]).toEqual([SOURCE_URL]);
-    expect(source.match(/\bopenURL\([^)]*\)/g)).toEqual(['openURL(SOURCE_URL)']);
+    expect(appSource().match(/\bopenURL\([^)]*\)/g)).toEqual(['openURL(SOURCE_URL)']);
+  });
+
+  it("keeps the website's client to the site's own api/, and Stripe's Checkout as the one place it sends the page", () => {
+    // connect-src 'self' is what the browser holds it to; this is what the source holds it to.
+    const [file] = WEB_ONLY;
+    const code = fs.readFileSync(path.join(root, file!), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); // WEB_ONLY names one file
+    // Every request is a fetch of an address apiUrl() builds beside the page...
+    const fetches = code.match(/\bfetch\([^,]*/g) ?? [];
+    expect(fetches).toEqual(['fetch(apiUrl(route)', 'fetch(apiUrl(route)']);
+    expect(code).toMatch(/return new URL\(`api\/\$\{route\}`, page\)\.href;/);
+    // ...and nothing else that opens a socket is there.
+    expect(NETWORK.test(code.replace(/\bfetch\(apiUrl\(/g, ''))).toBe(false);
+    // The one outside address it names is Checkout's, where Buy sends the page and nowhere else.
+    expect(code.match(/['"`]https?:[^'"`]*['"`]/g)).toEqual(["'https://checkout.stripe.com'"]);
+    expect(code).toMatch(/return typeof value === 'string' && value\.startsWith\(`\$\{CHECKOUT_ORIGIN\}\/`\);/);
+    // The page leaves for two places: the sign-in start under api/, and a Checkout address once
+    // isCheckoutUrl has passed it. Nothing is opened in a new window, and nothing through Linking.
+    expect(code.match(/location\.assign\(\w+/g)).toEqual(['location.assign(apiUrl', 'location.assign(url']);
+    expect(code).toMatch(/if \(!isCheckoutUrl\(url\)\) return 'failed';\s*window\.location\.assign\(url\);/);
+    expect(code).not.toMatch(/window\.open|openURL|Linking|location\.(href|replace)\s*=|location\.replace\(/);
+  });
+
+  it('gives a phone the inert twin, which answers "not configured" and opens nothing', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    try {
+      expect(accountClient.web).toBe(false);
+      expect(await accountClient.config()).toBeNull();
+      expect(await accountClient.me()).toBeNull();
+      expect(await accountClient.signOut()).toBe(false);
+      expect(await accountClient.deleteAccount()).toBe(false);
+      expect(await accountClient.checkout('supporter')).toBe('unavailable');
+      expect(accountClient.takeLanding()).toBe(NO_LANDING);
+      accountClient.signIn();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const twin = fs.readFileSync(path.join(root, 'src', 'accountClient.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(twin).not.toMatch(new RegExp(`${NETWORK.source}|openURL|https?://|window|location|document`));
+    // Nothing the phone bundles reaches the web client, or the API, by another name.
+    for (const [file, code] of appSources()) {
+      if (WEB_ONLY.includes(file)) continue;
+      expect([file, /from '[^']*accountClient\.web'|require\([^)]*accountClient\.web|from '[^']*(?:server|functions)\//.test(code)]).toEqual([file, false]);
+    }
+  });
+
+  it('is what Metro resolves the account client to on each platform: the twin on a phone, the client on the web', () => {
+    // Metro's own resolver with Expo's source extensions, as `expo export` runs it: a file named
+    // for a platform wins for that platform, then `.native` for both phones, then the plain name.
+    // A `.native.ts`, `.ios.ts` or `.android.ts` beside the twin would be what a phone bundles.
+    const local = createRequire(path.join(root, 'package.json'));
+    const { getDefaultConfig } = local('expo/metro-config');
+    const { resolve } = local('metro-resolver');
+    const config = getDefaultConfig(root);
+    const origin = path.join(root, 'src', 'account.tsx');
+    const resolved = (platform: string) => {
+      const context = {
+        allowHaste: false,
+        assetExts: new Set(config.resolver.assetExts),
+        customResolverOptions: {},
+        disableHierarchicalLookup: false,
+        doesFileExist: (file: string) => fs.existsSync(file) && fs.statSync(file).isFile(),
+        extraNodeModules: null,
+        dev: false,
+        getPackage: () => null,
+        getPackageForModule: () => null,
+        fileSystemLookup: (file: string) => {
+          const full = path.resolve(root, file);
+          if (!fs.existsSync(full)) return { exists: false };
+          return { exists: true, type: fs.statSync(full).isDirectory() ? 'd' : 'f', realPath: fs.realpathSync(full) };
+        },
+        mainFields: config.resolver.resolverMainFields,
+        originModulePath: origin,
+        nodeModulesPaths: [],
+        preferNativePlatform: platform !== 'web',
+        resolveAsset: () => null,
+        redirectModulePath: (file: string) => file,
+        resolveHasteModule: () => null,
+        resolveHastePackage: () => null,
+        sourceExts: config.resolver.sourceExts,
+        unstable_conditionNames: [],
+        unstable_conditionsByPlatform: {},
+        unstable_enablePackageExports: false,
+        unstable_incrementalResolution: false,
+        unstable_logWarning: () => {},
+      };
+      const result = resolve(context, './accountClient', platform);
+      return path.relative(root, result.filePath);
+    };
+    expect(fs.readFileSync(origin, 'utf8')).toMatch(/^import \{ accountClient \} from '\.\/accountClient';$/m);
+    expect(resolved('ios')).toBe(path.join('src', 'accountClient.ts'));
+    expect(resolved('android')).toBe(path.join('src', 'accountClient.ts'));
+    expect(resolved('web')).toBe(path.join('src', 'accountClient.web.ts'));
   });
 
   it('gives a development build the network back, in the debug source set only', async () => {

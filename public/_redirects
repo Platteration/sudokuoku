@@ -4,8 +4,12 @@
 # paths and refuses the rest, as the Apache and nginx configs do, so publish the folder the build
 # writes and never a checkout. Cloudflare Pages takes no 404 rules from this file, so there
 # nothing refuses .htaccess (it holds the same public headers as _headers, nothing secret), and
-# GitHub Pages serves all three hosting files.
+# GitHub Pages serves all three hosting files. _routes.json is Cloudflare Pages' (which runs the
+# site's sign-in and shop API, functions/api/[[path]].js, for the paths it names; the build writes
+# it). Netlify runs no function of this site, so its api/ is a 404 like any other missing address,
+# and the page draws no sign-in and no shop.
 /_headers        /404.html  404!
 /_redirects      /404.html  404!
 /.htaccess       /404.html  404!
+/_routes.json    /404.html  404!
 /metadata.json   /404.html  404!

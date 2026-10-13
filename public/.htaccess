@@ -2,6 +2,12 @@
 # public/ into the published folder; Netlify and Cloudflare Pages read _headers beside it, and
 # nginx takes deploy/nginx.conf from the repository. The values are the same in all of them
 # (src/__tests__/website.test.ts); _headers says why each one is what it is.
+#
+# The website's sign-in and shop API (server/kit: `node server/start.mjs` on 127.0.0.1:8788) cannot
+# be proxied from this file: mod_proxy is server configuration. In the virtual host, with mod_proxy
+# and mod_proxy_http: ProxyPass "/api/" "http://127.0.0.1:8788/api/" (README, "Sign-in and Support
+# this app"). Without it api/ is a 404 like any address that is not the site's, and the page draws
+# no sign-in and no shop.
 
 Options -Indexes
 ServerSignature Off
@@ -25,14 +31,15 @@ ErrorDocument 403 /404.html
   # index.html): the page, the 404 page, the safety net, the tab icon, robots.txt, the security
   # contact, the bundle and the icon font (each matched by the content hash in its name), and the
   # certificate checks a webroot ACME client writes. Every other address answers 404: this file
-  # and the other hosting configs, Expo's update manifest, folders (a 404, not a 403 that hints
+  # and the other hosting configs (Cloudflare Pages' _routes.json too), Expo's update manifest,
+  # folders (a 404, not a 403 that hints
   # at a listing), and every file of a checkout should one be served by mistake
   # (src/__tests__/website.test.ts walks `git ls-files` through these rules).
   RewriteRule !^(index\.html|404\.html|guard\.js|favicon\.ico|robots\.txt|\.well-known/security\.txt|\.well-known/acme-challenge/[A-Za-z0-9_-]+|_expo/static/js/web/[A-Za-z0-9_-]+-[0-9a-f]{32}\.js|assets/[A-Za-z0-9@/._-]+\.[0-9a-f]{32}\.[a-z0-9]+)?$ - [R=404,L]
 </IfModule>
 
 <IfModule mod_headers.c>
-  Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'"
+  Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'"
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "DENY"
   Header always set Referrer-Policy "no-referrer"

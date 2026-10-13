@@ -35,14 +35,17 @@ const CELL_BACKGROUNDS: (keyof Colors)[] = [
  * Text pairings the app actually draws, as [foreground, background]. Read off
  * the components: `text`/`textMuted` on the screen and sheet background, on
  * cards and rows (`surface`), on the segmented track and preset icon
- * (`cellPeer`), on the daily note and badge rows (`accentSoft`) and on the XP
- * card (`primarySoft`); `onPrimary` on buttons and the done daily dot;
- * `primary` on stat values, active pack and preset names and the frozen dot;
- * `danger` on the reset button; `phantom` on the phantom line; the banner's
- * two tones; `onAccent` on the active control; and the board's three digit
+ * (`cellPeer`), on the daily note, badge rows and the website's account
+ * notice (`accentSoft`) and on the XP card (`primarySoft`); `onPrimary` on
+ * buttons and the done daily dot; `primary` on stat values, active pack and
+ * preset names, the frozen dot and About's thanks to a supporter; `danger` on
+ * the reset and Delete account buttons (`dangerSoft`) and on a failed account
+ * action's note (`surface`); `phantom` on the phantom line; the banner's two
+ * tones; `onAccent` on the active control; and the board's three digit
  * colours (givens, entries, wrong or clashing entries) on every cell
  * background — pencil marks draw in `text`, which is also `given` in every
- * pack. `success` is only drawn as an icon, but is held to the same bar.
+ * pack. `success` is drawn as an icon, and as the support card's Owned on
+ * `surface`.
  */
 const TEXT_PAIRS: [keyof Colors, keyof Colors][] = [
   ['text', 'background'],
