@@ -14,6 +14,17 @@ Google and a "Support this app" payment (see
 [Sign-in and Support this app](#sign-in-and-support-this-app)); without it, as on
 GitHub Pages, neither is shown.
 
+## Design comparisons
+
+The dated Sudoku comparisons and concept artwork are versioned in the shared bundle in the Chess repository:
+
+- [Sudoku phone screenshot comparison](https://github.com/Platteration/chesscheatser/blob/4d6a208d90d404f2d6a3b93fcf17ae3707b58f0d/docs/comparisons/comparisons/sudokuoku-phone-light-game.png)
+- [Sudoku sprite style comparisons](https://github.com/Platteration/chesscheatser/blob/4d6a208d90d404f2d6a3b93fcf17ae3707b58f0d/docs/comparisons/styles/comparisons/sudoku-light.png)
+- [Complete galleries, PNG sprites and editable Blender projects](https://github.com/Platteration/chesscheatser/tree/4d6a208d90d404f2d6a3b93fcf17ae3707b58f0d/docs/comparisons)
+- [Clone, open, edit or export the comparison bundle](https://github.com/Platteration/chesscheatser/blob/4d6a208d90d404f2d6a3b93fcf17ae3707b58f0d/docs/comparisons/GIT.md)
+
+The screenshots record the 11 October 2026 capture commits; the Arcade Pop, Neon Circuit and Porcelain Studio concepts were added on 13 October. These links pin the shared asset revision so they remain reproducible as the apps evolve.
+
 ## Running it
 
 ```bash
